@@ -1,0 +1,17 @@
+# Python Requirements untuk Integration Scripts
+
+# MQTT Client
+paho-mqtt==1.6.1
+
+# Modbus TCP untuk OpenPLC
+pymodbus==3.5.4
+
+# Database drivers
+pymysql==1.1.0        # Untuk MySQL/MariaDB (ScadaBR)
+psycopg2-binary==2.9.9  # Untuk PostgreSQL
+
+# OPC UA (untuk WinCC, dll)
+opcua==0.98.13
+
+# Utilities
+python-dotenv==1.0.0   # Untuk load configuration dari .env file

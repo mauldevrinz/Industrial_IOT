@@ -23,7 +23,7 @@ A modern, real-time Industrial IoT monitoring and control dashboard built with R
 
 ### OpenPLC Integration
 - **One-Click Launcher**: Open OpenPLC Editor directly from dashboard
-- **OTA Updates**: Upload compiled programs (.bin, .st, .ino) to ESP32
+- **OTA Updates**: Upload compiled programs (.bin, .st, .ino) to PLC
 - **File Picker**: Easy file selection with validation
 - **MQTT Transmission**: Base64-encoded OTA delivery
 
@@ -362,7 +362,7 @@ MIT License - see LICENSE file for details
 
 ## 👨‍💻 Author
 
-**Maulana Devrinz**
+**Maulvin Nazir**
 - GitHub: [@mauldevrinz](https://github.com/mauldevrinz)
 
 ## 🙏 Acknowledgments

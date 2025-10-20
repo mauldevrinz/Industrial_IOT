@@ -4,9 +4,17 @@ import { Download, RefreshCw, Thermometer, Droplets, Wind, Zap, TrendingUp, Tren
 import { useMultipleSensors } from '../../hooks/useSensorData';
 
 const Data = () => {
-  const { temperature, humidity, pressure, co2 } = useMultipleSensors();
+  const { temperature, level, pressure, co2 } = useMultipleSensors();
   const [selectedMetric, setSelectedMetric] = useState('temperature');
   const [showExportModal, setShowExportModal] = useState(false);
+
+  // Debug: Log sensor data
+  console.log('📊 Data Page - Sensor Data:', {
+    temperature: { current: temperature.current, historyLength: temperature.history.length },
+    level: { current: level.current, historyLength: level.history.length },
+    pressure: { current: pressure.current, historyLength: pressure.history.length },
+    co2: { current: co2.current, historyLength: co2.history.length },
+  });
 
   // Data Management Settings
   const [dataSettings, setDataSettings] = useState({
@@ -26,8 +34,8 @@ const Data = () => {
       case 'temperature':
         sensorData = temperature;
         break;
-      case 'humidity':
-        sensorData = humidity;
+      case 'level':
+        sensorData = level;
         break;
       case 'pressure':
         sensorData = pressure;
@@ -37,6 +45,19 @@ const Data = () => {
         break;
       default:
         sensorData = temperature;
+    }
+
+    console.log(`📈 Chart Data for ${selectedMetric}:`, {
+      historyLength: sensorData.history.length,
+      history: sensorData.history,
+    });
+
+    // If no history, create placeholder with current value
+    if (!sensorData.history || sensorData.history.length === 0) {
+      return [{
+        time: new Date().toLocaleTimeString(),
+        value: sensorData.current || 0,
+      }];
     }
 
     return sensorData.history.map((item, index) => ({
@@ -91,9 +112,9 @@ const Data = () => {
       darkBg: 'from-orange-500 to-red-500'
     },
     {
-      id: 'humidity',
-      name: 'Humidity',
-      unit: '%',
+      id: 'level',
+      name: 'Level',
+      unit: 'Level',
       color: '#3b82f6',
       gradient: 'from-blue-500 to-cyan-500',
       icon: Droplets,
@@ -103,7 +124,7 @@ const Data = () => {
     {
       id: 'pressure',
       name: 'Pressure',
-      unit: 'bar',
+      unit: 'PSI',
       color: '#10b981',
       gradient: 'from-emerald-500 to-teal-500',
       icon: Wind,
@@ -204,7 +225,7 @@ const Data = () => {
                 <div className="mb-4">
                   <div className="flex items-baseline space-x-2">
                     <span className="text-6xl font-bold text-white">
-                      {latestValue.toFixed(1)}
+                      {selectedMetric === 'level' ? Math.round(latestValue) : latestValue.toFixed(1)}
                     </span>
                     <span className="text-3xl font-semibold text-white/80">{currentMetric.unit}</span>
                   </div>
@@ -228,21 +249,21 @@ const Data = () => {
               <div className="bg-white rounded-xl p-4 shadow-md">
                 <p className="text-xs text-gray-500 mb-1 font-medium">Maximum</p>
                 <p className={`text-xl font-bold bg-gradient-to-r ${currentMetric.gradient} bg-clip-text text-transparent`}>
-                  {maxValue.toFixed(1)}
+                  {selectedMetric === 'level' ? Math.round(maxValue) : maxValue.toFixed(1)}
                 </p>
                 <p className="text-xs text-gray-400">{currentMetric.unit}</p>
               </div>
               <div className="bg-white rounded-xl p-4 shadow-md">
                 <p className="text-xs text-gray-500 mb-1 font-medium">Average</p>
                 <p className={`text-xl font-bold bg-gradient-to-r ${currentMetric.gradient} bg-clip-text text-transparent`}>
-                  {avgValue.toFixed(1)}
+                  {selectedMetric === 'level' ? Math.round(avgValue) : avgValue.toFixed(1)}
                 </p>
                 <p className="text-xs text-gray-400">{currentMetric.unit}</p>
               </div>
               <div className="bg-white rounded-xl p-4 shadow-md">
                 <p className="text-xs text-gray-500 mb-1 font-medium">Minimum</p>
                 <p className={`text-xl font-bold bg-gradient-to-r ${currentMetric.gradient} bg-clip-text text-transparent`}>
-                  {minValue.toFixed(1)}
+                  {selectedMetric === 'level' ? Math.round(minValue) : minValue.toFixed(1)}
                 </p>
                 <p className="text-xs text-gray-400">{currentMetric.unit}</p>
               </div>
@@ -278,7 +299,7 @@ const Data = () => {
                               {metric.name}
                             </div>
                             <div className={`text-xs ${isSelected ? 'text-white/80' : 'text-gray-500'}`}>
-                              Unit: {metric.unit}
+                              {metric.id === 'level' ? '3 Levels (1-3)' : `Unit: ${metric.unit}`}
                             </div>
                           </div>
                         </div>
@@ -371,26 +392,38 @@ const Data = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {chartData.slice(-10).reverse().map((row, index) => (
-                  <tr key={index} className="hover:bg-gray-50 transition">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {row.time}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`text-lg font-bold bg-gradient-to-r ${currentMetric.gradient} bg-clip-text text-transparent`}>
-                        {row.value.toFixed(2)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 font-medium">
-                      {currentMetric.unit}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-emerald-100 text-emerald-800">
-                        Normal
-                      </span>
+                {chartData.length > 0 ? (
+                  chartData.slice(-10).reverse().map((row, index) => (
+                    <tr key={index} className="hover:bg-gray-50 transition">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {row.time}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`text-lg font-bold bg-gradient-to-r ${currentMetric.gradient} bg-clip-text text-transparent`}>
+                          {row.value.toFixed(2)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 font-medium">
+                        {currentMetric.unit}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-emerald-100 text-emerald-800">
+                          Normal
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="4" className="px-6 py-12 text-center">
+                      <div className="text-gray-400">
+                        <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                        <p className="text-lg font-semibold">No data available yet</p>
+                        <p className="text-sm">Waiting for sensor data from MQTT...</p>
+                      </div>
                     </td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>

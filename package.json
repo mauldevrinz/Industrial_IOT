@@ -17,6 +17,7 @@
     "express": "^5.1.0",
     "lucide-react": "^0.546.0",
     "mqtt": "^5.14.1",
+    "multer": "^2.0.2",
     "react": "^19.1.1",
     "react-circular-progressbar": "^2.2.0",
     "react-dom": "^19.1.1",

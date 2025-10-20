@@ -17,8 +17,8 @@
 #include <ArduinoJson.h>
 
 // ========== WiFi Configuration ==========
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
+const char* ssid = "blink";
+const char* password = "blink123";
 
 // ========== MQTT Configuration ==========
 const char* mqtt_server = "192.168.1.100";  // Your MQTT broker IP
@@ -29,7 +29,7 @@ const char* device_id = "ESP32_001";  // Unique device identifier
 
 // ========== MQTT Topics ==========
 const char* topic_temperature = "iiot/sensor/temperature";
-const char* topic_humidity = "iiot/sensor/humidity";
+const char* topic_level = "iiot/sensor/level";
 const char* topic_pressure = "iiot/sensor/pressure";
 const char* topic_vibration = "iiot/sensor/vibration";
 const char* topic_machine_status = "iiot/machine/status";
@@ -43,7 +43,7 @@ const char* topic_command = "iiot/command";
 // ========== Pin Configuration ==========
 const int LED_PIN = 2;  // Built-in LED
 const int TEMP_SENSOR_PIN = 34;
-const int HUMIDITY_SENSOR_PIN = 35;
+const int LEVEL_SENSOR_PIN = 35;
 const int PRESSURE_SENSOR_PIN = 32;
 const int VIBRATION_SENSOR_PIN = 33;
 
@@ -55,7 +55,7 @@ const long publishInterval = 5000;  // Publish every 5 seconds
 
 bool machineRunning = false;
 float baseTemperature = 25.0;
-float baseHumidity = 45.0;
+float baseLevel = 45.0;
 
 // ========== Function Prototypes ==========
 void setup_wifi();
@@ -63,14 +63,14 @@ void reconnect_mqtt();
 void callback(char* topic, byte* payload, unsigned int length);
 void publishSensorData();
 void publishTemperature();
-void publishHumidity();
+void publishLevel();
 void publishPressure();
 void publishVibration();
 void publishMachineStatus();
 void publishKPI();
 void publishMaintenanceAlert(String message, String severity);
 float readTemperature();
-float readHumidity();
+float readLevel();
 float readPressure();
 float readVibration();
 
@@ -224,7 +224,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
 void publishSensorData() {
   Serial.println("Publishing sensor data...");
   publishTemperature();
-  publishHumidity();
+  publishLevel();
   publishPressure();
   publishVibration();
   publishMachineStatus();
@@ -252,12 +252,12 @@ void publishTemperature() {
   }
 }
 
-// ========== Publish Humidity ==========
-void publishHumidity() {
+// ========== Publish Level ==========
+void publishLevel() {
   StaticJsonDocument<200> doc;
 
-  float humidity = readHumidity();
-  doc["value"] = round(humidity * 10) / 10.0;
+  float level = readLevel();
+  doc["value"] = round(level * 10) / 10.0;
   doc["unit"] = "%";
   doc["timestamp"] = millis();
   doc["device_id"] = device_id;
@@ -266,9 +266,9 @@ void publishHumidity() {
   char buffer[256];
   serializeJson(doc, buffer);
 
-  if (client.publish(topic_humidity, buffer)) {
-    Serial.print("Humidity published: ");
-    Serial.print(humidity);
+  if (client.publish(topic_level, buffer)) {
+    Serial.print("Level published: ");
+    Serial.print(level);
     Serial.println(" %");
   }
 }
@@ -425,11 +425,11 @@ float readTemperature() {
   return temperature;
 }
 
-float readHumidity() {
-  // Simulate humidity reading
-  // Replace with actual sensor code (e.g., DHT22, BME280, etc.)
-  float humidity = baseHumidity + random(-100, 100) / 10.0;
-  return constrain(humidity, 0, 100);
+float readLevel() {
+  // Simulate level reading
+  // Replace with actual sensor code (e.g., ultrasonic sensor, pressure sensor, etc.)
+  float level = baseLevel + random(-100, 100) / 10.0;
+  return constrain(level, 0, 100);
 }
 
 float readPressure() {

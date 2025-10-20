@@ -1,32 +1,62 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { mqttService } from '../services/mqttService';
 
+// Global flag to track if MQTT is already connected
+let globalConnectionInitialized = false;
+let globalConnectionPromise = null;
+
 export const useMQTT = () => {
-  const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [connectionStatus, setConnectionStatus] = useState(mqttService.getStatus());
   const [error, setError] = useState(null);
+  const isMounted = useRef(true);
 
   useEffect(() => {
-    // Connect to MQTT broker on mount
-    mqttService
-      .connect()
-      .then(() => {
-        setConnectionStatus('connected');
-        setError(null);
-      })
-      .catch((err) => {
-        setConnectionStatus('error');
-        setError(err.message);
-      });
+    isMounted.current = true;
+
+    // Only connect once globally, not per component
+    if (!globalConnectionInitialized) {
+      globalConnectionInitialized = true;
+      console.log('🌐 Initializing global MQTT connection...');
+
+      globalConnectionPromise = mqttService
+        .connect()
+        .then(() => {
+          if (isMounted.current) {
+            setConnectionStatus('connected');
+            setError(null);
+          }
+        })
+        .catch((err) => {
+          if (isMounted.current) {
+            setConnectionStatus('error');
+            setError(err.message);
+          }
+        });
+    } else {
+      // Use existing connection
+      console.log('♻️  Reusing existing MQTT connection');
+      if (globalConnectionPromise) {
+        globalConnectionPromise.then(() => {
+          if (isMounted.current) {
+            setConnectionStatus(mqttService.getStatus());
+          }
+        });
+      }
+    }
 
     // Update status periodically
     const statusInterval = setInterval(() => {
-      setConnectionStatus(mqttService.getStatus());
-    }, 1000);
+      if (isMounted.current) {
+        setConnectionStatus(mqttService.getStatus());
+      }
+    }, 2000); // Reduced frequency to 2 seconds
 
-    // Cleanup on unmount
+    // Cleanup on unmount - DON'T disconnect, just cleanup interval
     return () => {
+      isMounted.current = false;
       clearInterval(statusInterval);
-      mqttService.disconnect();
+      // DO NOT DISCONNECT - let the connection persist
+      console.log('🧹 Component unmounted, keeping MQTT connection alive');
     };
   }, []);
 

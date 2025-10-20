@@ -8,41 +8,39 @@ A modern, real-time Industrial IoT monitoring and control dashboard built with R
 ## 🌟 Features
 
 ### Real-time Monitoring
-- Live sensor data visualization (Temperature, Humidity, Pressure, CO2)
-- Interactive charts and trend analysis
-- Historical data export (CSV, JSON, XML)
-- Real-time actuator control
+- **Live Sensor Data**: Temperature, Level (3-level discrete), Pressure, CO2 Gas
+- **Dual-Sensor Level System**: Low & High sensors for accurate tank monitoring
+- **Interactive Charts**: Real-time trend visualization with historical data
+- **Data Export**: Export to CSV, JSON, or Excel formats
+- **Global State**: Data persists across page navigation
+- **Error Detection**: Automatic sensor malfunction detection
 
 ### Actuator Control
-- 6 controllable actuators (Motor, Pump, Fan, Heater, Valve, Compressor)
-- MQTT-based state persistence
-- Real-time status feedback
-- Toggle switches with visual indicators
-
-### Predictive Maintenance (RAM Calculator)
-- **Reliability** metrics calculation
-- **Availability** monitoring
-- **Maintainability** (MTTR) analysis
-- Automated maintenance recommendations
+- **6 Controllable Actuators**: Motor, Pump, Fan, Heater, Valve, Compressor
+- **MQTT-Based Control**: Real-time state synchronization
+- **Visual Feedback**: Toggle switches with status indicators
+- **State Persistence**: Actuator states saved globally
 
 ### OpenPLC Integration
-- One-click OpenPLC Editor launcher
-- Over-The-Air (OTA) program updates
-- Direct integration with ESP32 devices
+- **One-Click Launcher**: Open OpenPLC Editor directly from dashboard
+- **OTA Updates**: Upload compiled programs (.bin, .st, .ino) to ESP32
+- **File Picker**: Easy file selection with validation
+- **MQTT Transmission**: Base64-encoded OTA delivery
 
 ### Settings Management
-- MQTT broker configuration
-- Browser notifications
-- Settings import/export
-- Persistent localStorage
+- **MQTT Configuration**: Easy broker setup
+- **Browser Notifications**: Real-time alerts
+- **Settings Persistence**: localStorage-based
+- **Import/Export**: Backup and restore settings
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js 16+ and npm
-- MQTT Broker (Mosquitto, HiveMQ, or EMQX)
-- Optional: ESP32 microcontroller with MQTT support
-- Optional: OpenPLC Editor
+- **Node.js 16+** and npm
+- **MQTT Broker**: Pre-configured for broker.hivemq.com (public broker)
+- **Optional**: ESP32 with MQTT support
+- **Optional**: OpenPLC Editor
+- **Optional**: mosquitto-clients for testing
 
 ### Installation
 
@@ -57,432 +55,325 @@ cd Industrial_IOT
 npm install
 ```
 
-3. **Configure MQTT settings**
+3. **Start the application**
 
-Edit `src/config/mqtt.config.js`:
-```javascript
-broker: {
-  host: 'your-mqtt-broker.com',  // Change this
-  port: 8883,
-  protocol: 'ws',  // or 'wss' for secure
-}
-```
-
-4. **Start the application**
-
-**Option 1: One Command (Recommended)**
+**🎯 Fastest Way (Recommended):**
 ```bash
 ./start.sh
 ```
 
-**Option 2: Using npm**
-```bash
-npm run dev:all
-```
+This will:
+- ✅ Check dependencies
+- ✅ Verify MQTT broker connectivity
+- ✅ Start Frontend (http://localhost:5173)
+- ✅ Start Backend (http://localhost:3001)
 
-**Option 3: Separate Terminals**
+**Manual Start:**
 ```bash
 # Terminal 1 - Frontend
 npm run dev
 
 # Terminal 2 - Backend
-npm run server
+node server.cjs
 ```
 
-5. **Access the dashboard**
-- **Frontend**: http://localhost:5174
-- **Backend API**: http://localhost:3001
-- **Health Check**: http://localhost:3001/api/health
+4. **Stop the application**
+```bash
+./stop.sh
+```
 
-## 📊 Technology Stack
+## 📡 MQTT Configuration
 
-### Frontend
-- React 19.1.1
-- Vite 7.1.7
-- Tailwind CSS 3.4.17
-- Recharts 3.3.0
-- MQTT.js 5.14.1
-- Lucide React (icons)
+### Current Setup
+The dashboard is configured to use **broker.hivemq.com**:
+- **Frontend**: `ws://broker.hivemq.com:8000/mqtt` (WebSocket)
+- **Backend**: `mqtt://broker.hivemq.com:1883` (TCP)
+- **Test Script**: `broker.hivemq.com:1883` (TCP)
 
-### Backend
-- Express 5.1.0
-- Node.js
-- MQTT integration
+### Change MQTT Broker
+
+Edit `src/config/mqtt.config.js`:
+```javascript
+broker: {
+  host: 'broker.hivemq.com',  // Your MQTT broker
+  port: 8000,                 // WebSocket port
+  protocol: 'ws',              // 'ws' or 'wss'
+  path: '/mqtt',              // MQTT path
+}
+```
+
+### MQTT Topics
+
+**Sensor Topics** (Subscribe):
+- `iiot/sensor/temperature` - Temperature sensor (°C)
+- `iiot/sensor/level/low` - Low level sensor (0 or 1)
+- `iiot/sensor/level/high` - High level sensor (0 or 1)
+- `iiot/sensor/pressure` - Pressure sensor (bar)
+- `iiot/sensor/co2` - CO2 gas sensor (ppm)
+
+**Actuator Topics** (Publish/Subscribe):
+- `iiot/actuator/motor`
+- `iiot/actuator/pump`
+- `iiot/actuator/fan`
+- `iiot/actuator/heater`
+- `iiot/actuator/valve`
+- `iiot/actuator/compressor`
+- `iiot/actuator/status` (Combined status)
+
+**Control Topics**:
+- `iiot/control/ota/{device_id}` (OTA updates)
+
+## 🧪 Testing MQTT
+
+### Send Test Data (Continuous)
+
+Run the included test script to send random sensor data:
+
+```bash
+./test-mqtt.sh
+```
+
+This will:
+- Send random sensor data every 3 seconds
+- Continuously loop until Ctrl+C
+- Show transmission count and values
+
+**Data ranges:**
+- Temperature: 18-32°C
+- Level: Discrete (L:0/1, H:0/1)
+  - L:0 H:0 → Level 1 (Empty)
+  - L:1 H:0 → Level 2 (Filling)
+  - L:1 H:1 → Level 3 (Full)
+  - L:0 H:1 → Error (Sensor malfunction)
+- Pressure: 1.0-3.5 bar (displayed as PSI)
+- CO2: 350-650 ppm
+
+### Manual Testing
+
+Send individual MQTT messages:
+
+```bash
+# Temperature
+mosquitto_pub -h broker.hivemq.com -t iiot/sensor/temperature -m '{"value": 25.5, "unit": "celsius"}'
+
+# Level (send both low and high sensors)
+mosquitto_pub -h broker.hivemq.com -t iiot/sensor/level/low -m '{"value": 1}'
+mosquitto_pub -h broker.hivemq.com -t iiot/sensor/level/high -m '{"value": 0}'
+
+# Pressure
+mosquitto_pub -h broker.hivemq.com -t iiot/sensor/pressure -m '{"value": 2.1, "unit": "bar"}'
+
+# CO2
+mosquitto_pub -h broker.hivemq.com -t iiot/sensor/co2 -m '{"value": 450, "unit": "ppm"}'
+```
+
+## 📊 Dashboard Pages
+
+### 1. Overview
+- **Sensor Cards**: Real-time values with trends
+  - Temperature (°C)
+  - Level (Discrete 3-level system)
+    - Level 1: Empty (L:0 H:0)
+    - Level 2: Filling (L:1 H:0)
+    - Level 3: Full (L:1 H:1)
+    - ERROR: Sensor malfunction (L:0 H:1)
+  - Pressure (PSI, auto-converted from bar)
+  - CO2 Gas (ppm)
+- **System Runtime**: Persistent connection timer
+- **Actuator Control**: 6 actuators with toggle switches
+
+### 2. Data
+- **Trend Charts**: Interactive area charts with tooltips
+- **Statistics**: Max, Min, Average values
+- **Data Table**: Last 10 readings with timestamps
+- **Sensor Selection**: Switch between different sensors
+- **Export**: Download data in CSV/JSON/Excel
+
+### 3. Settings
+- **MQTT Configuration**: Broker settings
+- **OpenPLC Launcher**: Open editor directly
+- **OTA Upload**: Upload programs to ESP32
+- **Browser Notifications**: Enable/disable alerts
+- **Settings Import/Export**: Backup configuration
+
+## 🔧 OTA Upload Guide
+
+### Upload Ladder Diagram to ESP32
+
+1. **Compile in OpenPLC Editor**
+   - Write your ladder logic
+   - Compile to generate `.bin` file
+   - File will be in build folder
+
+2. **Upload via Dashboard**
+   - Go to **Settings** page
+   - Click **"Choose File"** under OTA Upload
+   - Select compiled `.bin`, `.st`, or `.ino` file
+   - Click **"Send OTA Update"**
+
+3. **ESP32 Receives Update**
+   - Dashboard sends file via MQTT
+   - ESP32 subscribes to `iiot/control/ota/{device_id}`
+   - File is base64-encoded for transmission
+   - ESP32 decodes and flashes the program
+
+### Supported File Types
+- `.bin` - Compiled binary
+- `.st` - Structured Text
+- `.ino` - Arduino sketch
+
+### File Size Limit
+- Maximum: 10MB per file
 
 ## 📁 Project Structure
 
 ```
-IIOT/
-├── server.cjs                 # Backend server (Port 3001)
-├── start.sh                   # Quick start script
+Industrial_IOT/
 ├── src/
 │   ├── components/
-│   │   ├── dashboard/
-│   │   │   ├── Overview.jsx      # Main dashboard with actuators
-│   │   │   ├── Data.jsx          # Sensor data & charts
-│   │   │   ├── RAMCalculator.jsx # Predictive maintenance
-│   │   │   └── Settings.jsx      # PLC & OTA controls
-│   │   ├── Sidebar.jsx
-│   │   └── Navbar.jsx
+│   │   └── dashboard/
+│   │       ├── Overview.jsx      # Main dashboard with sensors & actuators
+│   │       ├── Data.jsx          # Charts and data visualization
+│   │       └── Settings.jsx      # Configuration and OTA upload
 │   ├── hooks/
-│   │   ├── useMQTT.js           # MQTT connection hook
+│   │   ├── useMQTT.js           # MQTT connection hook (singleton)
 │   │   └── useSensorData.js     # Sensor data management
 │   ├── services/
-│   │   └── mqttService.js       # MQTT service layer
-│   ├── utils/
-│   │   ├── notifications.js     # Browser notifications
-│   │   └── settingsStorage.js   # Settings persistence
+│   │   └── mqttService.js       # MQTT service (global state)
 │   └── config/
 │       └── mqtt.config.js       # MQTT configuration
-├── integration-scripts/
-│   ├── openplc_bridge.py        # OpenPLC integration
-│   └── scada_db_bridge.py       # SCADA database bridge
-└── examples/
-    └── esp32_mqtt_example.ino   # ESP32 example code
+├── server.cjs                    # Backend server (OTA, OpenPLC)
+├── test-mqtt.sh                  # Continuous MQTT test script
+├── start.sh                      # Start frontend + backend
+├── stop.sh                       # Stop all services
+└── README.md                     # This file
 ```
 
-## 🔌 MQTT Integration
-
-### Topics Configuration
-
-**Sensor Data:**
-- `iiot/sensor/temperature` - Temperature readings (°C)
-- `iiot/sensor/humidity` - Humidity readings (%)
-- `iiot/sensor/pressure` - Pressure readings (Bar)
-- `iiot/sensor/co2` - CO2 gas concentration (ppm)
-
-**Actuator Control:**
-- `iiot/actuator/motor` - Motor control
-- `iiot/actuator/pump` - Pump control
-- `iiot/actuator/fan` - Fan control
-- `iiot/actuator/heater` - Heater control
-- `iiot/actuator/valve` - Valve control
-- `iiot/actuator/compressor` - Compressor control
-- `iiot/actuator/status` - All actuators status
-
-**Machine Status:**
-- `iiot/machine/status` - Operational status
-- `iiot/machine/speed` - Current speed
-- `iiot/machine/output` - Production output
-
-**KPI Metrics:**
-- `iiot/kpi/oee` - Overall Equipment Effectiveness
-- `iiot/kpi/availability` - Machine availability
-- `iiot/kpi/performance` - Performance efficiency
-- `iiot/kpi/quality` - Quality metrics
-
-### Message Format
-
-All MQTT messages use JSON format:
-
-```json
-{
-  "value": 25.5,
-  "unit": "°C",
-  "timestamp": 1634567890,
-  "trend": 2.5
-}
-```
-
-### Actuator Message Format
-
-```json
-{
-  "state": true,
-  "timestamp": 1634567890,
-  "device": "motor"
-}
-```
-
-## 🔧 MQTT Broker Setup
-
-### Install Mosquitto
-
-**Ubuntu/Debian:**
-```bash
-sudo apt-get install mosquitto mosquitto-clients
-sudo systemctl enable mosquitto
-sudo systemctl start mosquitto
-```
-
-**macOS:**
-```bash
-brew install mosquitto
-brew services start mosquitto
-```
-
-**Windows:**
-Download from [mosquitto.org](https://mosquitto.org/download/)
-
-### Enable WebSocket Support
-
-Edit `/etc/mosquitto/mosquitto.conf`:
-```
-listener 1883
-protocol mqtt
-
-listener 8080
-protocol websockets
-```
-
-Restart Mosquitto:
-```bash
-sudo systemctl restart mosquitto
-```
-
-## 🎮 Backend API Endpoints
-
-### 1. Open OpenPLC Editor
-```bash
-POST http://localhost:3001/api/open-plc-editor
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "OpenPLC Editor opened successfully"
-}
-```
-
-### 2. Send OTA Update
-```bash
-POST http://localhost:3001/api/send-ota
-Content-Type: application/json
-
-{
-  "programFile": "program.st",
-  "targetDevice": "ESP32-001"
-}
-```
-
-### 3. Update MQTT Configuration
-```bash
-POST http://localhost:3001/api/update-mqtt-config
-Content-Type: application/json
-
-{
-  "host": "broker.example.com",
-  "port": 8883,
-  "username": "user",
-  "password": "pass"
-}
-```
-
-### 4. Health Check
-```bash
-GET http://localhost:3001/api/health
-```
-
-## 🤖 ESP32 Integration
-
-### Required Libraries
-- PubSubClient (MQTT)
-- ArduinoJson
-- WiFi (built-in)
-
-### Example Code
-See `examples/esp32_mqtt_example.ino` for complete implementation.
-
-**Basic Structure:**
-```cpp
-#include <WiFi.h>
-#include <PubSubClient.h>
-#include <ArduinoJson.h>
-
-const char* mqtt_server = "your-broker-ip";
-const int mqtt_port = 1883;
-
-WiFiClient espClient;
-PubSubClient client(espClient);
-
-void publishSensorData() {
-  StaticJsonDocument<200> doc;
-  doc["value"] = readTemperature();
-  doc["unit"] = "°C";
-  doc["timestamp"] = millis();
-
-  char buffer[256];
-  serializeJson(doc, buffer);
-  client.publish("iiot/sensor/temperature", buffer);
-}
-```
-
-## 📱 Features Walkthrough
-
-### Dashboard Overview
-- Real-time sensor readings with trend indicators
-- Actuator control switches
-- System runtime monitoring
-- MQTT connection status
-
-### Log Data Page
-- Sensor selection dropdown
-- Real-time trend charts
-- Data export functionality
-- Statistics (Max, Avg, Min)
-
-### RAM Calculator
-- Input operational parameters
-- Calculate reliability metrics
-- Analyze availability percentages
-- Generate maintenance schedules
-
-### Settings Page
-- MQTT broker configuration
-- Browser notification preferences
-- OpenPLC Editor launcher
-- OTA program upload
-
-## 🛠️ Customization
-
-### Adding New Sensors
-
-1. **Update MQTT config** (`src/config/mqtt.config.js`):
-```javascript
-topics: {
-  newSensor: 'iiot/sensor/newsensor',
-}
-```
-
-2. **Add to hook** (`src/hooks/useSensorData.js`):
-```javascript
-const newSensorRaw = useSensorData(topics.newSensor);
-```
-
-3. **Add visualization** in dashboard components
-
-### Changing Theme Colors
-
-Edit `tailwind.config.js`:
-```javascript
-theme: {
-  extend: {
-    colors: {
-      primary: '#your-color',
-    }
-  }
-}
-```
-
-## 🚢 Production Deployment
-
-1. **Build the application:**
-```bash
-npm run build
-```
-
-2. **Deploy `dist` folder** to your web server
-
-3. **Configure production MQTT:**
-   - Use SSL/TLS (wss://)
-   - Enable authentication
-   - Configure CORS properly
-   - Set up rate limiting
-
-4. **Environment variables:**
-```env
-VITE_MQTT_HOST=broker.example.com
-VITE_MQTT_PORT=8883
-VITE_MQTT_PROTOCOL=wss
-```
-
-## 🔒 Security Considerations
-
-- ✅ Use SSL/TLS for MQTT (wss://) in production
-- ✅ Implement MQTT broker authentication
-- ✅ Use environment variables for credentials
-- ✅ Enable CORS restrictions
-- ✅ Implement rate limiting
-- ✅ Sanitize all inputs
-- ✅ Add API authentication
-
-## 🐛 Troubleshooting
+## 🛠️ Troubleshooting
 
 ### MQTT Connection Issues
 
-**Check broker status:**
-```bash
-sudo systemctl status mosquitto
-```
+**Problem**: "MQTT Client Offline" or connection loop
 
-**Test MQTT connection:**
-```bash
-mosquitto_sub -h localhost -t "iiot/#" -v
-```
+**Solution**:
+1. Check broker is accessible:
+   ```bash
+   ping broker.hivemq.com
+   ```
+2. Verify WebSocket port is open (8000)
+3. Check browser console for errors
+4. Try refreshing browser (Ctrl+Shift+R)
 
-**Verify WebSocket port:**
-```bash
-netstat -an | grep 8080
-```
+**Problem**: "Not authorized" error
 
-### Backend Issues
+**Solution**:
+- HiveMQ public broker doesn't require auth
+- If using private broker, add credentials in `mqtt.config.js`:
+  ```javascript
+  auth: {
+    username: 'your_username',
+    password: 'your_password',
+  }
+  ```
 
-**Check if backend is running:**
-```bash
-curl http://localhost:3001/api/health
-```
+### Data Not Showing
 
-**Restart backend:**
-```bash
-npm run server
-```
+**Problem**: Charts empty or no data in Data page
 
-### OpenPLC Editor Not Opening
+**Solution**:
+1. Ensure MQTT is connected (check Overview page status)
+2. Run test script: `./test-mqtt.sh`
+3. Check console logs for "📨 Message received"
+4. Wait for multiple data points (at least 3-5)
 
-**Make script executable:**
-```bash
-chmod +x ~/Documents/OpenPLC_Editor/openplc_editor.sh
-```
+**Problem**: Runtime resets when navigating pages
 
-**Test manually:**
-```bash
-cd ~/Documents/OpenPLC_Editor
-./openplc_editor.sh
-```
+**Solution**:
+- This was fixed with global state management
+- If still happening, hard refresh (Ctrl+Shift+R)
 
-## 📚 Available Scripts
+### OTA Upload Issues
 
-- `npm run dev` - Start development server
-- `npm run server` - Start backend server
-- `npm run dev:all` - Start both frontend and backend
-- `npm run build` - Build for production
-- `npm run preview` - Preview production build
-- `npm run lint` - Run ESLint
+**Problem**: "MQTT client not connected" when uploading
 
-## 📊 Project Stats
+**Solution**:
+1. Check MQTT connection status in Overview
+2. Ensure backend server is running: `node server.cjs`
+3. Verify broker is accessible from backend
 
-- 42 files
-- 14,438 lines of code
-- 4 sensor types
-- 6 actuators
-- Real-time MQTT integration
+**Problem**: File upload rejected
 
-## 🤝 Contributing
+**Solution**:
+- Only `.bin`, `.st`, `.ino` files allowed
+- Maximum file size: 10MB
+- Check file extension matches content type
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+### Backend Server Issues
 
-## 📄 License
+**Problem**: Backend won't start
 
-This project is licensed under the MIT License.
+**Solution**:
+1. Install dependencies: `npm install`
+2. Check port 3001 is not in use:
+   ```bash
+   lsof -i :3001
+   ```
+3. Kill existing process if needed:
+   ```bash
+   kill -9 <PID>
+   ```
 
-## 👤 Author
+## 🔒 Security Notes
 
-**Maulvin Nazir**
+### MQTT Security
+- **Public Broker**: broker.hivemq.com is public, no authentication
+- **For Production**: Use private broker with TLS and authentication
+- **Topics**: Use unique prefixes to avoid conflicts
+
+### OTA Security
+- **Validation**: File types are validated (.bin, .st, .ino)
+- **Size Limit**: 10MB maximum
+- **Encoding**: Base64 for safe MQTT transmission
+- **Cleanup**: Temporary files deleted after 5 seconds
+
+## 🐛 Known Limitations
+
+1. **Public Broker**: Using public MQTT broker (not secure for production)
+2. **No Authentication**: Dashboard doesn't have user authentication
+3. **Local Storage**: Settings stored in browser localStorage only
+4. **No Database**: Historical data not persisted to database
+5. **ESP32 Required**: Actuator control requires ESP32 with MQTT client
+6. **Level Sensors**: Assumes correct physical sensor placement (low below high)
+
+## 🚀 Future Enhancements
+
+- [ ] User authentication and authorization
+- [ ] Database integration for historical data
+- [ ] Email/SMS alerts for critical values
+- [ ] Multi-device support (multiple ESP32s)
+- [ ] Advanced analytics and reporting
+- [ ] Mobile app (React Native)
+- [ ] Predictive maintenance with ML
+- [ ] Docker containerization
+
+## 📝 License
+
+MIT License - see LICENSE file for details
+
+## 👨‍💻 Author
+
+**Maulana Devrinz**
 - GitHub: [@mauldevrinz](https://github.com/mauldevrinz)
-- LinkedIn: [maulvinnazir](https://linkedin.com/in/maulvinnazir)
-- Instagram: [@nazirrrvyn](https://instagram.com/nazirrrvyn)
 
 ## 🙏 Acknowledgments
 
-- Built with React and Vite
-- MQTT implementation using MQTT.js
-- Charts powered by Recharts
-- Icons by Lucide React
-- Generated with Claude Code
+- React + Vite for fast development
+- MQTT.js for MQTT client
+- Recharts for beautiful charts
+- Lucide React for icons
+- HiveMQ for public MQTT broker
+- OpenPLC for industrial automation
 
 ---
 
-Made with ❤️ for Industrial IoT
-
-**Repository:** https://github.com/mauldevrinz/Industrial_IOT
+**Need Help?** Open an issue on GitHub or check the troubleshooting section above.

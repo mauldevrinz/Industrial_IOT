@@ -42,6 +42,8 @@ const Settings = () => {
 
   const [otaStatus, setOtaStatus] = useState('');
   const [plcStatus, setPlcStatus] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [fileName, setFileName] = useState('');
 
   const handleMqttChange = (field, value) => {
     setMqttSettings(prev => ({ ...prev, [field]: value }));
@@ -159,25 +161,49 @@ const Settings = () => {
     setTimeout(() => setPlcStatus(''), 5000);
   };
 
+  const handleFileSelect = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      // Validate file type
+      const validExtensions = ['.bin', '.st', '.ino'];
+      const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+
+      if (!validExtensions.includes(fileExtension)) {
+        alert('⚠️ Please select a valid file (.bin, .st, or .ino)');
+        return;
+      }
+
+      setSelectedFile(file);
+      setFileName(file.name);
+      setOtaStatus(`📄 File selected: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`);
+    }
+  };
+
   const handleSendOTA = async () => {
     if (!isConnected) {
       alert('⚠️ Please connect to MQTT broker first!');
       return;
     }
 
+    if (!selectedFile) {
+      alert('⚠️ Please select a file to upload first!');
+      return;
+    }
+
     setOtaStatus('📦 Preparing OTA update...');
 
     try {
-      setOtaStatus('📡 Sending program via MQTT...');
+      // Create FormData to send file
+      const formData = new FormData();
+      formData.append('programFile', selectedFile);
+      formData.append('targetDevice', 'ESP32-001');
+
+      setOtaStatus('📡 Uploading program via MQTT...');
 
       // Call backend API to send OTA
       const response = await fetch('http://localhost:3001/api/send-ota', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          programFile: 'program.st',
-          targetDevice: 'ESP32-001'
-        })
+        body: formData
       });
 
       const data = await response.json();
@@ -283,11 +309,32 @@ const Settings = () => {
                 </div>
               </div>
 
+              {/* File Upload Input */}
+              <div className="mb-4">
+                <span className="text-sm font-medium text-emerald-50 block mb-2">Select Program File (.bin, .st, .ino)</span>
+                <input
+                  type="file"
+                  accept=".bin,.st,.ino"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  id="ota-file-input"
+                />
+                <label
+                  htmlFor="ota-file-input"
+                  className="flex items-center justify-center w-full px-4 py-3 bg-white/20 rounded-xl border-2 border-dashed border-white/40 hover:bg-white/30 transition cursor-pointer backdrop-blur-sm"
+                >
+                  <Upload className="w-5 h-5 mr-2" />
+                  <span className="text-sm font-medium">
+                    {fileName || 'Choose file...'}
+                  </span>
+                </label>
+              </div>
+
               <button
                 onClick={handleSendOTA}
-                disabled={!isConnected}
+                disabled={!isConnected || !selectedFile}
                 className={`w-full px-6 py-3 rounded-xl transition font-semibold flex items-center justify-center space-x-2 shadow-lg ${
-                  isConnected
+                  isConnected && selectedFile
                     ? 'bg-white text-emerald-600 hover:bg-emerald-50'
                     : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                 }`}

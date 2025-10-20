@@ -58,8 +58,8 @@ REGISTER_MAPPING = {
         'scale': 0.1,  # Nilai di register = nilai aktual * 10
     },
     'holding:1': {
-        'topic': 'iiot/sensor/humidity',
-        'name': 'Humidity',
+        'topic': 'iiot/sensor/level',
+        'name': 'Level',
         'unit': '%',
         'scale': 0.1,
     },

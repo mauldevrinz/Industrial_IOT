@@ -5,7 +5,6 @@ import {
   Gauge as GaugeIcon,
   Zap,
   TrendingUp,
-  TrendingDown,
   Fan,
   Lightbulb,
   Wind,
@@ -15,31 +14,24 @@ import {
 import { useMultipleSensors } from '../../hooks/useSensorData';
 import { useMQTT } from '../../hooks/useMQTT';
 import { mqttConfig } from '../../config/mqtt.config';
+import { mqttService } from '../../services/mqttService';
 
 const Overview = () => {
-  const { temperature, humidity, pressure, co2 } = useMultipleSensors();
+  const { temperature, level, pressure, co2 } = useMultipleSensors();
   const { isConnected, publish, subscribe } = useMQTT();
 
-  // Runtime tracking
+  // Runtime tracking - use global runtime from mqttService
   const [runtime, setRuntime] = useState(0);
-  const connectionStartTimeRef = useRef(null);
 
-  // Track when MQTT connects
+  // Update runtime every second using global connection time
   useEffect(() => {
-    if (isConnected && !connectionStartTimeRef.current) {
-      connectionStartTimeRef.current = Date.now();
-    } else if (!isConnected) {
-      connectionStartTimeRef.current = null;
+    if (!isConnected) {
       setRuntime(0);
+      return;
     }
-  }, [isConnected]);
-
-  // Update runtime every second
-  useEffect(() => {
-    if (!isConnected || !connectionStartTimeRef.current) return;
 
     const interval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - connectionStartTimeRef.current) / 1000);
+      const elapsed = mqttService.getRuntime();
       setRuntime(elapsed);
     }, 1000);
 
@@ -186,23 +178,31 @@ const Overview = () => {
                 </div>
               </div>
 
-              {/* Humidity Card */}
+              {/* Level Card */}
               <div className="bg-gradient-to-br from-blue-100 via-cyan-100 to-sky-100 backdrop-blur-xl rounded-xl p-4 shadow-lg border-2 border-blue-300 hover:shadow-xl hover:scale-105 transition-all duration-300">
                 <div className="flex items-center space-x-3 mb-3">
                   <div className="p-2.5 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 shadow-md">
                     <Droplets className="w-5 h-5 text-white" />
                   </div>
-                  <span className="text-xs font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">HUMIDITY</span>
+                  <span className="text-xs font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">LEVEL</span>
                 </div>
                 <div className="flex items-baseline space-x-2">
-                  <span className="text-3xl font-bold text-[#2c3e50]">{humidity.current.toFixed(0)}</span>
-                  <span className="text-lg font-semibold text-[#737491]">%</span>
+                  <span className={`text-3xl font-bold ${level.current === 0 ? 'text-red-600' : 'text-[#2c3e50]'}`}>
+                    {level.current === 0 ? 'ERROR' : `Level ${level.current}`}
+                  </span>
                 </div>
                 <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs text-[#737491]">38 (Good)</span>
-                  <span className="text-xs font-bold text-emerald-600 flex items-center">
-                    <TrendingUp className="w-3 h-3 mr-1" />
-                    {Math.abs(calculateTrend(humidity.history)).toFixed(1)}%
+                  <span className="text-xs text-[#737491]">
+                    L:{level.lowSensor} H:{level.highSensor}
+                  </span>
+                  <span className={`text-xs font-bold flex items-center ${
+                    level.current === 0 ? 'text-red-600' :
+                    level.current === 1 ? 'text-red-600' :
+                    level.current === 2 ? 'text-yellow-600' : 'text-emerald-600'
+                  }`}>
+                    {level.current === 0 ? '⚠ Sensor Error' :
+                     level.current === 1 ? '⚠ Empty' :
+                     level.current === 2 ? '● Filling' : '✓ Full'}
                   </span>
                 </div>
               </div>
@@ -216,13 +216,13 @@ const Overview = () => {
                   <span className="text-xs font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">PRESSURE</span>
                 </div>
                 <div className="flex items-baseline space-x-2">
-                  <span className="text-3xl font-bold text-[#2c3e50]">{pressure.current.toFixed(1)}</span>
-                  <span className="text-lg font-semibold text-[#737491]">bar</span>
+                  <span className="text-3xl font-bold text-[#2c3e50]">{(pressure.current * 14.5038).toFixed(1)}</span>
+                  <span className="text-lg font-semibold text-[#737491]">PSI</span>
                 </div>
                 <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs text-[#737491]">Slightly dry</span>
-                  <span className="text-xs font-bold text-red-600 flex items-center">
-                    <TrendingDown className="w-3 h-3 mr-1" />
+                  <span className="text-xs text-[#737491]">{pressure.current.toFixed(2)} bar</span>
+                  <span className="text-xs font-bold text-emerald-600 flex items-center">
+                    <TrendingUp className="w-3 h-3 mr-1" />
                     {Math.abs(calculateTrend(pressure.history)).toFixed(1)}%
                   </span>
                 </div>

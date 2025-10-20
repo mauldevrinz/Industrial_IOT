@@ -2,10 +2,12 @@
 export const mqttConfig = {
   // Broker Configuration
   broker: {
-    host: 'localhost', // Change to your MQTT broker host
-    port: 8883, // WebSocket port (usually 8883 for secure, 8080 for non-secure)
-    protocol: 'ws', // Use 'wss' for secure WebSocket
-    clientId: `iiot_dashboard_${Math.random().toString(16).slice(2, 10)}`,
+    host: 'broker.hivemq.com', // HiveMQ public broker
+    port: 8000, // WebSocket port
+    protocol: 'ws', // Use 'ws' for WebSocket
+    path: '/mqtt', // MQTT path
+    // Use more unique client ID to avoid collisions
+    clientId: `iiot_web_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`,
   },
 
   // Authentication (if required)
@@ -16,17 +18,21 @@ export const mqttConfig = {
 
   // Connection Options
   options: {
-    keepalive: 60,
+    keepalive: 60, // Increased to 60 seconds
     clean: true,
-    reconnectPeriod: 1000,
-    connectTimeout: 30 * 1000,
+    reconnectPeriod: 10000, // Increased to 10 seconds to avoid spam
+    connectTimeout: 45 * 1000, // Increased to 45 seconds
+    will: undefined, // No last will message
+    rejectUnauthorized: false, // Accept self-signed certificates
+    protocolVersion: 4, // Use MQTT v3.1.1
   },
 
   // Topics Configuration
   topics: {
     // Sensor data topics from ESP32
     temperature: 'iiot/sensor/temperature',
-    humidity: 'iiot/sensor/humidity',
+    levelLow: 'iiot/sensor/level/low',   // Low level sensor (0 or 1)
+    levelHigh: 'iiot/sensor/level/high', // High level sensor (0 or 1)
     pressure: 'iiot/sensor/pressure',
     co2: 'iiot/sensor/co2',
 

@@ -57,7 +57,7 @@ UPDATE_INTERVAL = 10
 TAG_MAPPING = {
     # ScadaBR tag names
     'TEMP_SENSOR_01': 'iiot/sensor/temperature',
-    'HUMIDITY_01': 'iiot/sensor/humidity',
+    'LEVEL_01': 'iiot/sensor/level',
     'PRESSURE_TRANS_01': 'iiot/sensor/pressure',
     'VIBRATION_SENSOR_01': 'iiot/sensor/vibration',
     'LINE_SPEED': 'iiot/machine/speed',

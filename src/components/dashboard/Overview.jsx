@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Thermometer,
   Droplets,
@@ -9,34 +9,128 @@ import {
   Lightbulb,
   Wind,
   Activity,
-  Clock
+  Clock,
+  Cpu,
+  Box
 } from 'lucide-react';
 import { useMultipleSensors } from '../../hooks/useSensorData';
 import { useMQTT } from '../../hooks/useMQTT';
+import { useMQTTPolling } from '../../hooks/useMQTTPolling';
+import { useSensorContext } from '../../context/SensorContext';
 import { mqttConfig } from '../../config/mqtt.config';
 import { mqttService } from '../../services/mqttService';
 
 const Overview = () => {
   const { temperature, level, pressure, co2 } = useMultipleSensors();
   const { isConnected, publish, subscribe } = useMQTT();
+  const pollData = useMQTTPolling(1000); // Poll every 1 second
+  
+  // Use context for persistent runtime and sensor data
+  const { runtime, setRuntime, motorStatus, setMotorStatus } = useSensorContext();
 
-  // Runtime tracking - use global runtime from mqttService
-  const [runtime, setRuntime] = useState(0);
+  // Current sensor reading (real-time, not persistent)
+  const [sensors, setSensors] = useState({
+    adxl345: { ax: 0, ay: 0, az: 0 },
+    mpu6050: { accel: { x: 0, y: 0, z: 0 }, gyro: { x: 0, y: 0, z: 0 }, temp: 0 },
+    bmp280: { temp: 0, pressure: 0, altitude: 0 }
+  });
 
-  // Update runtime every second using global connection time
+  // Throttle buffer - stores latest data but only updates UI periodically
+  const throttleBuffer = useRef({
+    adxl345: null,
+    mpu6050: null,
+    bmp280: null
+  });
+  const lastUpdateTime = useRef({ adxl345: 0, mpu6050: 0, bmp280: 0 });
+  const THROTTLE_MS = 100; // Update UI every 100ms to match ESP32 data rate
+
+  // Subscribe to ESP32 sensors from MQTT
   useEffect(() => {
     if (!isConnected) {
-      setRuntime(0);
+      console.log('⏳ Not connected yet, skipping subscriptions');
       return;
     }
 
-    const interval = setInterval(() => {
-      const elapsed = mqttService.getRuntime();
-      setRuntime(elapsed);
-    }, 1000);
+    console.log('✅ Connected! Setting up subscriptions...');
 
-    return () => clearInterval(interval);
-  }, [isConnected]);
+    const handleADXL = (payload) => {
+      if (payload?.ax !== undefined) {
+        // Direct update without throttle for real-time response
+        setSensors(prev => ({
+          ...prev,
+          adxl345: {
+            ax: payload.ax,
+            ay: payload.ay,
+            az: payload.az
+          }
+        }));
+      }
+    };
+
+    const handleMPU = (payload) => {
+      if (payload?.accel?.x !== undefined) {
+        // Direct update without throttle for real-time response
+        setSensors(prev => ({
+          ...prev,
+          mpu6050: {
+            accel: {
+              x: payload.accel.x,
+              y: payload.accel.y,
+              z: payload.accel.z
+            },
+            gyro: {
+              x: payload.gyro.x,
+              y: payload.gyro.y,
+              z: payload.gyro.z
+            },
+            temp: payload.temp
+          }
+        }));
+      }
+    };
+
+    const handleBMP = (payload) => {
+      if (payload?.temp !== undefined) {
+        // Direct update without throttle for real-time response
+        setSensors(prev => ({
+          ...prev,
+          bmp280: {
+            temp: payload.temp,
+            pressure: payload.pressure,
+            altitude: payload.altitude
+          }
+        }));
+      }
+    };
+
+    const handleMotorStatus = (payload) => {
+      if (payload?.label !== undefined) {
+        setMotorStatus({
+          label: payload.label,
+          status: payload.status || (payload.label === 'normal' ? 'Normal' : 'Drop Voltage'),
+          voltage_stable: payload.voltage_stable !== undefined ? payload.voltage_stable : payload.label === 'normal',
+          confidence: payload.confidence || 0
+        });
+      }
+    };
+
+    subscribe('iiot/sensors/adxl345', handleADXL);
+    subscribe('iiot/sensors/mpu6050', handleMPU);
+    subscribe('iiot/sensors/bmp280', handleBMP);
+    subscribe('iiot/motor/status', handleMotorStatus);
+    
+    console.log('✅ Subscribed to ESP32 sensors and motor status');
+
+  }, [isConnected, subscribe]);
+
+  // Sync polling data when available (fallback untuk WebSocket)
+  useEffect(() => {
+    if (pollData.isConnected) {
+      setSensors(pollData.sensorData);
+      setMotorStatus(pollData.motorStatus);
+      console.log('📊 Data updated from polling');
+    }
+  }, [pollData.sensorData, pollData.motorStatus, pollData.isConnected]);
 
   // Format runtime as HH:MM:SS
   const formatRuntime = (seconds) => {
@@ -44,90 +138,6 @@ const Overview = () => {
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // Aktuator states
-  const [actuators, setActuators] = useState({
-    motor: { status: true, power: 100, label: 'Main Motor', color: 'blue' },
-    pump: { status: true, power: 100, label: 'Water Pump', color: 'cyan' },
-    fan: { status: false, power: 0, label: 'Cooling Fan', color: 'purple' },
-    heater: { status: true, power: 100, label: 'Heater', color: 'orange' },
-    valve: { status: true, power: 100, label: 'Valve A1', color: 'emerald' },
-    compressor: { status: false, power: 0, label: 'Compressor', color: 'indigo' }
-  });
-
-  // Subscribe to actuator status updates from MQTT
-  useEffect(() => {
-    if (!isConnected) return;
-
-    // Subscribe to all actuator status updates
-    const unsubscribeStatus = subscribe(mqttConfig.topics.actuator.status, (payload) => {
-      console.log('Received actuator status update:', payload);
-      if (payload && typeof payload === 'object') {
-        setActuators(prev => {
-          const updated = { ...prev };
-          Object.keys(payload).forEach(key => {
-            if (updated[key]) {
-              updated[key] = {
-                ...updated[key],
-                status: payload[key].status,
-                power: payload[key].status ? 100 : 0
-              };
-            }
-          });
-          return updated;
-        });
-      }
-    });
-
-    // Subscribe to individual actuator topics
-    const unsubscribers = Object.keys(actuators).map(key => {
-      return subscribe(mqttConfig.topics.actuator[key], (payload) => {
-        console.log(`Received ${key} update:`, payload);
-        if (payload && typeof payload.status === 'boolean') {
-          setActuators(prev => ({
-            ...prev,
-            [key]: {
-              ...prev[key],
-              status: payload.status,
-              power: payload.status ? 100 : 0
-            }
-          }));
-        }
-      });
-    });
-
-    return () => {
-      if (unsubscribeStatus) unsubscribeStatus();
-      unsubscribers.forEach(unsub => unsub && unsub());
-    };
-  }, [isConnected, subscribe]);
-
-  const toggleActuator = (key) => {
-    const newStatus = !actuators[key].status;
-    const newPower = newStatus ? 100 : 0;
-
-    // Update local state immediately for responsive UI
-    setActuators(prev => ({
-      ...prev,
-      [key]: {
-        ...prev[key],
-        status: newStatus,
-        power: newPower
-      }
-    }));
-
-    // Publish to MQTT
-    if (isConnected && publish) {
-      const payload = {
-        status: newStatus,
-        power: newPower,
-        timestamp: new Date().toISOString()
-      };
-
-      console.log(`Publishing to ${mqttConfig.topics.actuator[key]}:`, payload);
-      publish(mqttConfig.topics.actuator[key], payload, mqttConfig.qos.default);
-    }
   };
 
   const calculateTrend = (history) => {
@@ -157,94 +167,106 @@ const Overview = () => {
 
             {/* Floating Sensor Cards */}
             <div className="grid grid-cols-2 gap-2 md:gap-3">
-              {/* Temperature Card */}
+              {/* ADXL345 Status Card */}
               <div className="bg-gradient-to-br from-blue-100 via-cyan-100 to-sky-100 backdrop-blur-xl rounded-lg md:rounded-xl p-3 md:p-4 shadow-lg border-2 border-blue-300 hover:shadow-xl hover:scale-105 transition-all duration-300">
                 <div className="flex items-center space-x-2 md:space-x-3 mb-2 md:mb-3">
                   <div className="p-1.5 md:p-2.5 rounded-lg md:rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 shadow-md">
-                    <Thermometer className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                    <Cpu className="w-4 h-4 md:w-5 md:h-5 text-white" />
                   </div>
-                  <span className="text-[10px] md:text-xs font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">TEMP</span>
+                  <span className="text-[10px] md:text-xs font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">ADXL345</span>
                 </div>
                 <div className="flex items-baseline space-x-1 md:space-x-2">
-                  <span className="text-2xl md:text-3xl font-bold text-[#2c3e50]">{temperature.current.toFixed(1)}</span>
-                  <span className="text-sm md:text-lg font-semibold text-[#737491]">°C</span>
+                  <span className="text-2xl md:text-3xl font-bold text-emerald-600">● Active</span>
                 </div>
                 <div className="mt-1 md:mt-2 flex items-center justify-between">
-                  <span className="text-[10px] md:text-xs text-[#737491]">Avg</span>
-                  <span className="text-[10px] md:text-xs font-bold text-emerald-600 flex items-center">
-                    <TrendingUp className="w-2 h-2 md:w-3 md:h-3 mr-0.5 md:mr-1" />
-                    {Math.abs(calculateTrend(temperature.history)).toFixed(1)}%
+                  <span className="text-[10px] md:text-xs text-[#737491]">3-Axis Accel</span>
+                  <span className="text-[10px] md:text-xs font-bold text-emerald-600">
+                    ✓ Ready
                   </span>
                 </div>
               </div>
 
-              {/* Level Card */}
-              <div className="bg-gradient-to-br from-blue-100 via-cyan-100 to-sky-100 backdrop-blur-xl rounded-xl p-4 shadow-lg border-2 border-blue-300 hover:shadow-xl hover:scale-105 transition-all duration-300">
-                <div className="flex items-center space-x-3 mb-3">
-                  <div className="p-2.5 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 shadow-md">
-                    <Droplets className="w-5 h-5 text-white" />
+              {/* MPU6050 Status Card */}
+              <div className="bg-gradient-to-br from-blue-100 via-cyan-100 to-sky-100 backdrop-blur-xl rounded-lg md:rounded-xl p-3 md:p-4 shadow-lg border-2 border-blue-300 hover:shadow-xl hover:scale-105 transition-all duration-300">
+                <div className="flex items-center space-x-2 md:space-x-3 mb-2 md:mb-3">
+                  <div className="p-1.5 md:p-2.5 rounded-lg md:rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 shadow-md">
+                    <Box className="w-4 h-4 md:w-5 md:h-5 text-white" />
                   </div>
-                  <span className="text-xs font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">LEVEL</span>
+                  <span className="text-[10px] md:text-xs font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">MPU6050</span>
                 </div>
-                <div className="flex items-baseline space-x-2">
-                  <span className={`text-3xl font-bold ${level.current === 0 ? 'text-red-600' : 'text-[#2c3e50]'}`}>
-                    {level.current === 0 ? 'ERROR' : `Level ${level.current}`}
+                <div className="flex items-baseline space-x-1 md:space-x-2">
+                  <span className="text-2xl md:text-3xl font-bold text-emerald-600">● Active</span>
+                </div>
+                <div className="mt-1 md:mt-2 flex items-center justify-between">
+                  <span className="text-[10px] md:text-xs text-[#737491]">6-Axis IMU</span>
+                  <span className="text-[10px] md:text-xs font-bold text-emerald-600">
+                    ✓ Ready
                   </span>
                 </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs text-[#737491]">
-                    L:{level.lowSensor} H:{level.highSensor}
+              </div>
+
+              {/* BMP280 Status Card */}
+              <div className="bg-gradient-to-br from-blue-100 via-cyan-100 to-sky-100 backdrop-blur-xl rounded-lg md:rounded-xl p-3 md:p-4 shadow-lg border-2 border-blue-300 hover:shadow-xl hover:scale-105 transition-all duration-300">
+                <div className="flex items-center space-x-2 md:space-x-3 mb-2 md:mb-3">
+                  <div className="p-1.5 md:p-2.5 rounded-lg md:rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 shadow-md">
+                    <GaugeIcon className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                  </div>
+                  <span className="text-[10px] md:text-xs font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">BMP280</span>
+                </div>
+                <div className="flex items-baseline space-x-1 md:space-x-2">
+                  <span className="text-2xl md:text-3xl font-bold text-emerald-600">● Active</span>
+                </div>
+                <div className="mt-1 md:mt-2 flex items-center justify-between">
+                  <span className="text-[10px] md:text-xs text-[#737491]">Barometric</span>
+                  <span className="text-[10px] md:text-xs font-bold text-emerald-600">
+                    ✓ Ready
                   </span>
-                  <span className={`text-xs font-bold flex items-center ${
-                    level.current === 0 ? 'text-red-600' :
-                    level.current === 1 ? 'text-red-600' :
-                    level.current === 2 ? 'text-yellow-600' : 'text-emerald-600'
+                </div>
+              </div>
+
+              {/* Motor Status Card - Edge Impulse Classification */}
+              <div className={`backdrop-blur-xl rounded-lg md:rounded-xl p-3 md:p-4 shadow-lg border-2 hover:shadow-xl hover:scale-105 transition-all duration-300 ${
+                motorStatus.label === 'normal' 
+                  ? 'bg-gradient-to-br from-emerald-100 via-green-100 to-teal-100 border-emerald-300' 
+                  : motorStatus.label === 'drop_voltage'
+                  ? 'bg-gradient-to-br from-red-100 via-orange-100 to-yellow-100 border-red-300'
+                  : 'bg-gradient-to-br from-gray-100 via-slate-100 to-gray-100 border-gray-300'
+              }`}>
+                <div className="flex items-center space-x-2 md:space-x-3 mb-2 md:mb-3">
+                  <div className={`p-1.5 md:p-2.5 rounded-lg md:rounded-xl shadow-md ${
+                    motorStatus.label === 'normal'
+                      ? 'bg-gradient-to-br from-emerald-500 to-green-500'
+                      : motorStatus.label === 'drop_voltage'
+                      ? 'bg-gradient-to-br from-red-500 to-orange-500'
+                      : 'bg-gradient-to-br from-gray-500 to-slate-500'
                   }`}>
-                    {level.current === 0 ? '⚠ Sensor Error' :
-                     level.current === 1 ? '⚠ Empty' :
-                     level.current === 2 ? '● Filling' : '✓ Full'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Pressure Card */}
-              <div className="bg-gradient-to-br from-blue-100 via-cyan-100 to-sky-100 backdrop-blur-xl rounded-xl p-4 shadow-lg border-2 border-blue-300 hover:shadow-xl hover:scale-105 transition-all duration-300">
-                <div className="flex items-center space-x-3 mb-3">
-                  <div className="p-2.5 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 shadow-md">
-                    <GaugeIcon className="w-5 h-5 text-white" />
+                    <Zap className="w-4 h-4 md:w-5 md:h-5 text-white" />
                   </div>
-                  <span className="text-xs font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">PRESSURE</span>
+                  <span className={`text-[10px] md:text-xs font-bold bg-clip-text text-transparent ${
+                    motorStatus.label === 'normal'
+                      ? 'bg-gradient-to-r from-emerald-600 to-green-600'
+                      : motorStatus.label === 'drop_voltage'
+                      ? 'bg-gradient-to-r from-red-600 to-orange-600'
+                      : 'bg-gradient-to-r from-gray-600 to-slate-600'
+                  }`}>MOTOR</span>
                 </div>
-                <div className="flex items-baseline space-x-2">
-                  <span className="text-3xl font-bold text-[#2c3e50]">{(pressure.current * 14.5038).toFixed(1)}</span>
-                  <span className="text-lg font-semibold text-[#737491]">PSI</span>
+                <div className="flex items-baseline space-x-1 md:space-x-2">
+                  <span className={`text-2xl md:text-3xl font-bold ${
+                    motorStatus.label === 'normal'
+                      ? 'text-emerald-600'
+                      : motorStatus.label === 'drop_voltage'
+                      ? 'text-red-600'
+                      : 'text-gray-600'
+                  }`}>{motorStatus.status}</span>
                 </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs text-[#737491]">{pressure.current.toFixed(2)} bar</span>
-                  <span className="text-xs font-bold text-emerald-600 flex items-center">
-                    <TrendingUp className="w-3 h-3 mr-1" />
-                    {Math.abs(calculateTrend(pressure.history)).toFixed(1)}%
+                <div className="mt-1 md:mt-2 flex items-center justify-between">
+                  <span className="text-[10px] md:text-xs text-[#737491]">
+                    {motorStatus.confidence > 0 ? `${(motorStatus.confidence * 100).toFixed(0)}%` : 'Voltage'}
                   </span>
-                </div>
-              </div>
-
-              {/* CO2 Card */}
-              <div className="bg-gradient-to-br from-blue-100 via-cyan-100 to-sky-100 backdrop-blur-xl rounded-xl p-4 shadow-lg border-2 border-blue-300 hover:shadow-xl hover:scale-105 transition-all duration-300">
-                <div className="flex items-center space-x-3 mb-3">
-                  <div className="p-2.5 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 shadow-md">
-                    <Zap className="w-5 h-5 text-white" />
-                  </div>
-                  <span className="text-xs font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">CO2 GAS</span>
-                </div>
-                <div className="flex items-baseline space-x-2">
-                  <span className="text-3xl font-bold text-[#2c3e50]">{co2.current.toFixed(1)}</span>
-                  <span className="text-lg font-semibold text-[#737491]">ppm</span>
-                </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs text-[#737491]">Normal range</span>
-                  <span className="text-xs font-bold text-emerald-600 flex items-center">
-                    <TrendingUp className="w-3 h-3 mr-1" />
-                    {Math.abs(calculateTrend(co2.history)).toFixed(1)}%
+                  <span className={`text-[10px] md:text-xs font-bold ${
+                    motorStatus.voltage_stable ? 'text-emerald-600' : 'text-red-600'
+                  }`}>
+                    {motorStatus.voltage_stable ? '✓ Stable' : '✗ Unstable'}
                   </span>
                 </div>
               </div>
@@ -256,7 +278,7 @@ const Overview = () => {
                 <div>
                   <p className="text-sm font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent mb-1">System Runtime</p>
                   <h2 className="text-3xl font-bold text-[#2c3e50]">
-                    {isConnected ? formatRuntime(runtime) : '--:--:--'}
+                    {isConnected || pollData.isConnected ? formatRuntime(runtime) : '--:--:--'}
                   </h2>
                 </div>
                 <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 shadow-md">
@@ -272,278 +294,180 @@ const Overview = () => {
         </div>
       </div>
 
-      {/* Main Content - Aktuator Status Section */}
+      {/* Main Content - ESP32 Sensors Section */}
       <div className="px-4 md:px-6 pb-6 md:pb-10 pt-4 md:pt-6 relative z-20">
         <div className="max-w-[1800px] mx-auto">
           {/* Section Header */}
           <div className="mb-4 md:mb-8">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl md:text-3xl font-bold text-[#2c3e50] mb-1 md:mb-2">Actuator Control Center</h2>
-              <p className="text-xs md:text-sm text-[#737491]">Monitor and control all industrial actuators in real-time</p>
+              <h2 className="text-xl md:text-3xl font-bold text-[#2c3e50] mb-1 md:mb-2">ESP32 Sensor Monitoring</h2>
+              <p className="text-xs md:text-sm text-[#737491]">Real-time sensor data from ESP32 via MQTT broker</p>
             </div>
             <div className="flex items-center space-x-2 bg-white px-3 md:px-4 py-2 rounded-lg md:rounded-xl shadow-sm border border-gray-100">
               <Activity className="w-4 h-4 md:w-5 md:h-5 text-emerald-600" />
               <div>
-                <p className="text-[10px] md:text-xs text-[#737491]">Active Actuators</p>
+                <p className="text-[10px] md:text-xs text-[#737491]">MQTT Status</p>
                 <p className="text-sm md:text-lg font-bold text-[#2c3e50]">
-                  {Object.values(actuators).filter(a => a.status).length}/{Object.keys(actuators).length}
+                  {isConnected || pollData.isConnected ? '● Connected' : '○ Disconnected'}
                 </p>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Actuator Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-          {/* Main Motor */}
-          <div className={`relative overflow-hidden bg-gradient-to-br ${actuators.motor.status ? 'from-blue-50 to-blue-100' : 'from-gray-50 to-gray-100'} rounded-2xl p-6 shadow-lg border-2 ${actuators.motor.status ? 'border-blue-200' : 'border-gray-200'} transition-all duration-300`}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className={`p-3 rounded-xl ${actuators.motor.status ? 'bg-blue-500' : 'bg-gray-400'} transition-all duration-300`}>
-                  <Zap className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-lg text-[#2c3e50]">{actuators.motor.label}</h3>
-                  <p className="text-xs text-[#737491]">AC Motor 3-Phase</p>
-                </div>
+        {/* Sensor Cards Grid - 3 columns in 1 row */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+          
+          {/* ADXL345 Card */}
+          <div className="bg-gradient-to-br from-blue-100 via-white to-blue-50 rounded-2xl p-6 shadow-lg border-2 border-blue-300 hover:shadow-xl hover:scale-105 transition-all duration-300">
+            <div className="flex items-center space-x-3 mb-5">
+              <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 shadow-md">
+                <Cpu className="w-6 h-6 text-white" />
               </div>
-              <button
-                onClick={() => toggleActuator('motor')}
-                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${actuators.motor.status ? 'bg-blue-600' : 'bg-gray-300'}`}
-              >
-                <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${actuators.motor.status ? 'translate-x-7' : 'translate-x-1'}`} />
-              </button>
+              <div>
+                <h3 className="font-bold text-xl text-[#2c3e50]">ADXL345</h3>
+                <p className="text-xs text-[#737491]">3-Axis Accelerometer</p>
+              </div>
             </div>
-
+            
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-[#737491]">Power Output</span>
-                <span className={`text-2xl font-bold ${actuators.motor.status ? 'text-blue-600' : 'text-gray-400'}`}>
-                  {actuators.motor.status ? 'ON' : 'OFF'}
-                </span>
+              {/* Acceleration X */}
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-200">
+                <p className="text-xs font-bold text-blue-600 mb-2">Acceleration X</p>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-bold text-[#2c3e50]">{sensors.adxl345.ax?.toFixed(2) || '0.00'}</span>
+                  <span className="text-base font-semibold text-[#737491]">g</span>
+                </div>
               </div>
-              <div className="w-full h-3 bg-white rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${actuators.motor.status ? 'bg-gradient-to-r from-blue-500 to-blue-600' : 'bg-gray-300'}`}
-                  style={{ width: `${actuators.motor.power}%` }}
-                />
+
+              {/* Acceleration Y */}
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-200">
+                <p className="text-xs font-bold text-blue-600 mb-2">Acceleration Y</p>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-bold text-[#2c3e50]">{sensors.adxl345.ay?.toFixed(2) || '0.00'}</span>
+                  <span className="text-base font-semibold text-[#737491]">g</span>
+                </div>
               </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-[#737491]">Status:</span>
-                <span className={`font-bold ${actuators.motor.status ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {actuators.motor.status ? '● RUNNING' : '○ STOPPED'}
-                </span>
+
+              {/* Acceleration Z */}
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-200">
+                <p className="text-xs font-bold text-blue-600 mb-2">Acceleration Z</p>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-bold text-[#2c3e50]">{sensors.adxl345.az?.toFixed(2) || '0.00'}</span>
+                  <span className="text-base font-semibold text-[#737491]">g</span>
+                </div>
+              </div>
+
+              {/* Status */}
+              <div className="flex items-center justify-between text-xs bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl p-3 border border-blue-200">
+                <span className="text-[#737491] font-semibold">Status:</span>
+                <span className="font-bold text-emerald-600">● Active</span>
               </div>
             </div>
           </div>
 
-          {/* Water Pump */}
-          <div className={`relative overflow-hidden bg-gradient-to-br ${actuators.pump.status ? 'from-cyan-50 to-cyan-100' : 'from-gray-50 to-gray-100'} rounded-2xl p-6 shadow-lg border-2 ${actuators.pump.status ? 'border-cyan-200' : 'border-gray-200'} transition-all duration-300`}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className={`p-3 rounded-xl ${actuators.pump.status ? 'bg-cyan-500' : 'bg-gray-400'} transition-all duration-300`}>
-                  <Droplets className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-lg text-[#2c3e50]">{actuators.pump.label}</h3>
-                  <p className="text-xs text-[#737491]">Centrifugal Pump</p>
-                </div>
+          {/* MPU6050 Card */}
+          <div className="bg-gradient-to-br from-blue-100 via-white to-blue-50 rounded-2xl p-6 shadow-lg border-2 border-blue-300 hover:shadow-xl hover:scale-105 transition-all duration-300">
+            <div className="flex items-center space-x-3 mb-5">
+              <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 shadow-md">
+                <Box className="w-6 h-6 text-white" />
               </div>
-              <button
-                onClick={() => toggleActuator('pump')}
-                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${actuators.pump.status ? 'bg-cyan-600' : 'bg-gray-300'}`}
-              >
-                <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${actuators.pump.status ? 'translate-x-7' : 'translate-x-1'}`} />
-              </button>
+              <div>
+                <h3 className="font-bold text-xl text-[#2c3e50]">MPU6050</h3>
+                <p className="text-xs text-[#737491]">6-Axis IMU Sensor</p>
+              </div>
             </div>
-
+            
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-[#737491]">Flow Rate</span>
-                <span className={`text-2xl font-bold ${actuators.pump.status ? 'text-cyan-600' : 'text-gray-400'}`}>
-                  {actuators.pump.status ? 'ON' : 'OFF'}
-                </span>
+              {/* Accel X */}
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-200">
+                <p className="text-xs font-bold text-blue-600 mb-2">Accel X / Gyro X</p>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-bold text-[#2c3e50]">{sensors.mpu6050.accel?.x?.toFixed(2) || '0.00'}</span>
+                  <span className="text-sm text-[#737491]">m/s²</span>
+                  <span className="text-sm text-[#737491]">/</span>
+                  <span className="text-lg font-bold text-[#2c3e50]">{sensors.mpu6050.gyro?.x?.toFixed(3) || '0.000'}</span>
+                  <span className="text-sm text-[#737491]">°/s</span>
+                </div>
               </div>
-              <div className="w-full h-3 bg-white rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${actuators.pump.status ? 'bg-gradient-to-r from-cyan-500 to-cyan-600' : 'bg-gray-300'}`}
-                  style={{ width: `${actuators.pump.power}%` }}
-                />
+
+              {/* Accel Y */}
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-200">
+                <p className="text-xs font-bold text-blue-600 mb-2">Accel Y / Gyro Y</p>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-bold text-[#2c3e50]">{sensors.mpu6050.accel?.y?.toFixed(2) || '0.00'}</span>
+                  <span className="text-sm text-[#737491]">m/s²</span>
+                  <span className="text-sm text-[#737491]">/</span>
+                  <span className="text-lg font-bold text-[#2c3e50]">{sensors.mpu6050.gyro?.y?.toFixed(3) || '0.000'}</span>
+                  <span className="text-sm text-[#737491]">°/s</span>
+                </div>
               </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-[#737491]">Status:</span>
-                <span className={`font-bold ${actuators.pump.status ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {actuators.pump.status ? '● RUNNING' : '○ STOPPED'}
-                </span>
+
+              {/* Accel Z */}
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-200">
+                <p className="text-xs font-bold text-blue-600 mb-2">Accel Z / Gyro Z</p>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-bold text-[#2c3e50]">{sensors.mpu6050.accel?.z?.toFixed(2) || '0.00'}</span>
+                  <span className="text-sm text-[#737491]">m/s²</span>
+                  <span className="text-sm text-[#737491]">/</span>
+                  <span className="text-lg font-bold text-[#2c3e50]">{sensors.mpu6050.gyro?.z?.toFixed(3) || '0.000'}</span>
+                  <span className="text-sm text-[#737491]">°/s</span>
+                </div>
+              </div>
+
+              {/* Status */}
+              <div className="flex items-center justify-between text-xs bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl p-3 border border-blue-200">
+                <span className="text-[#737491] font-semibold">Status:</span>
+                <span className="font-bold text-emerald-600">● Active</span>
               </div>
             </div>
           </div>
 
-          {/* Cooling Fan */}
-          <div className={`relative overflow-hidden bg-gradient-to-br ${actuators.fan.status ? 'from-purple-50 to-purple-100' : 'from-gray-50 to-gray-100'} rounded-2xl p-6 shadow-lg border-2 ${actuators.fan.status ? 'border-purple-200' : 'border-gray-200'} transition-all duration-300`}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className={`p-3 rounded-xl ${actuators.fan.status ? 'bg-purple-500' : 'bg-gray-400'} transition-all duration-300`}>
-                  <Fan className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-lg text-[#2c3e50]">{actuators.fan.label}</h3>
-                  <p className="text-xs text-[#737491]">Industrial Fan</p>
-                </div>
+          {/* BMP280 Card */}
+          <div className="bg-gradient-to-br from-blue-100 via-white to-blue-50 rounded-2xl p-6 shadow-lg border-2 border-blue-300 hover:shadow-xl hover:scale-105 transition-all duration-300">
+            <div className="flex items-center space-x-3 mb-5">
+              <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 shadow-md">
+                <GaugeIcon className="w-6 h-6 text-white" />
               </div>
-              <button
-                onClick={() => toggleActuator('fan')}
-                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${actuators.fan.status ? 'bg-purple-600' : 'bg-gray-300'}`}
-              >
-                <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${actuators.fan.status ? 'translate-x-7' : 'translate-x-1'}`} />
-              </button>
+              <div>
+                <h3 className="font-bold text-xl text-[#2c3e50]">BMP280</h3>
+                <p className="text-xs text-[#737491]">Barometric Sensor</p>
+              </div>
             </div>
-
+            
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-[#737491]">Speed</span>
-                <span className={`text-2xl font-bold ${actuators.fan.status ? 'text-purple-600' : 'text-gray-400'}`}>
-                  {actuators.fan.status ? 'ON' : 'OFF'}
-                </span>
-              </div>
-              <div className="w-full h-3 bg-white rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${actuators.fan.status ? 'bg-gradient-to-r from-purple-500 to-purple-600' : 'bg-gray-300'}`}
-                  style={{ width: `${actuators.fan.power}%` }}
-                />
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-[#737491]">Status:</span>
-                <span className={`font-bold ${actuators.fan.status ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {actuators.fan.status ? '● RUNNING' : '○ STOPPED'}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Heater */}
-          <div className={`relative overflow-hidden bg-gradient-to-br ${actuators.heater.status ? 'from-orange-50 to-orange-100' : 'from-gray-50 to-gray-100'} rounded-2xl p-6 shadow-lg border-2 ${actuators.heater.status ? 'border-orange-200' : 'border-gray-200'} transition-all duration-300`}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className={`p-3 rounded-xl ${actuators.heater.status ? 'bg-orange-500' : 'bg-gray-400'} transition-all duration-300`}>
-                  <Lightbulb className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-lg text-[#2c3e50]">{actuators.heater.label}</h3>
-                  <p className="text-xs text-[#737491]">Electric Heater</p>
+              {/* Temperature */}
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-200">
+                <p className="text-xs font-bold text-blue-600 mb-2">Temperature</p>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-bold text-[#2c3e50]">{sensors.bmp280.temp?.toFixed(2) || '0.00'}</span>
+                  <span className="text-base font-semibold text-[#737491]">°C</span>
                 </div>
               </div>
-              <button
-                onClick={() => toggleActuator('heater')}
-                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${actuators.heater.status ? 'bg-orange-600' : 'bg-gray-300'}`}
-              >
-                <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${actuators.heater.status ? 'translate-x-7' : 'translate-x-1'}`} />
-              </button>
-            </div>
 
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-[#737491]">Temperature</span>
-                <span className={`text-2xl font-bold ${actuators.heater.status ? 'text-orange-600' : 'text-gray-400'}`}>
-                  {actuators.heater.status ? 'ON' : 'OFF'}
-                </span>
-              </div>
-              <div className="w-full h-3 bg-white rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${actuators.heater.status ? 'bg-gradient-to-r from-orange-500 to-orange-600' : 'bg-gray-300'}`}
-                  style={{ width: `${actuators.heater.power}%` }}
-                />
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-[#737491]">Status:</span>
-                <span className={`font-bold ${actuators.heater.status ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {actuators.heater.status ? '● RUNNING' : '○ STOPPED'}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Valve */}
-          <div className={`relative overflow-hidden bg-gradient-to-br ${actuators.valve.status ? 'from-emerald-50 to-emerald-100' : 'from-gray-50 to-gray-100'} rounded-2xl p-6 shadow-lg border-2 ${actuators.valve.status ? 'border-emerald-200' : 'border-gray-200'} transition-all duration-300`}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className={`p-3 rounded-xl ${actuators.valve.status ? 'bg-emerald-500' : 'bg-gray-400'} transition-all duration-300`}>
-                  <GaugeIcon className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-lg text-[#2c3e50]">{actuators.valve.label}</h3>
-                  <p className="text-xs text-[#737491]">Control Valve</p>
+              {/* Pressure */}
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-200">
+                <p className="text-xs font-bold text-blue-600 mb-2">Pressure</p>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-bold text-[#2c3e50]">{sensors.bmp280.pressure?.toFixed(2) || '0.00'}</span>
+                  <span className="text-base font-semibold text-[#737491]">hPa</span>
                 </div>
               </div>
-              <button
-                onClick={() => toggleActuator('valve')}
-                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${actuators.valve.status ? 'bg-emerald-600' : 'bg-gray-300'}`}
-              >
-                <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${actuators.valve.status ? 'translate-x-7' : 'translate-x-1'}`} />
-              </button>
-            </div>
 
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-[#737491]">Opening</span>
-                <span className={`text-2xl font-bold ${actuators.valve.status ? 'text-emerald-600' : 'text-gray-400'}`}>
-                  {actuators.valve.status ? 'ON' : 'OFF'}
-                </span>
-              </div>
-              <div className="w-full h-3 bg-white rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${actuators.valve.status ? 'bg-gradient-to-r from-emerald-500 to-emerald-600' : 'bg-gray-300'}`}
-                  style={{ width: `${actuators.valve.power}%` }}
-                />
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-[#737491]">Status:</span>
-                <span className={`font-bold ${actuators.valve.status ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {actuators.valve.status ? '● OPEN' : '○ CLOSED'}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Compressor */}
-          <div className={`relative overflow-hidden bg-gradient-to-br ${actuators.compressor.status ? 'from-indigo-50 to-indigo-100' : 'from-gray-50 to-gray-100'} rounded-2xl p-6 shadow-lg border-2 ${actuators.compressor.status ? 'border-indigo-200' : 'border-gray-200'} transition-all duration-300`}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className={`p-3 rounded-xl ${actuators.compressor.status ? 'bg-indigo-500' : 'bg-gray-400'} transition-all duration-300`}>
-                  <Wind className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-lg text-[#2c3e50]">{actuators.compressor.label}</h3>
-                  <p className="text-xs text-[#737491]">Air Compressor</p>
+              {/* Altitude */}
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-200">
+                <p className="text-xs font-bold text-blue-600 mb-2">Altitude</p>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-bold text-[#2c3e50]">{sensors.bmp280.altitude?.toFixed(2) || '0.00'}</span>
+                  <span className="text-base font-semibold text-[#737491]">m</span>
                 </div>
               </div>
-              <button
-                onClick={() => toggleActuator('compressor')}
-                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${actuators.compressor.status ? 'bg-indigo-600' : 'bg-gray-300'}`}
-              >
-                <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${actuators.compressor.status ? 'translate-x-7' : 'translate-x-1'}`} />
-              </button>
-            </div>
 
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-[#737491]">Pressure</span>
-                <span className={`text-2xl font-bold ${actuators.compressor.status ? 'text-indigo-600' : 'text-gray-400'}`}>
-                  {actuators.compressor.status ? 'ON' : 'OFF'}
-                </span>
-              </div>
-              <div className="w-full h-3 bg-white rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${actuators.compressor.status ? 'bg-gradient-to-r from-indigo-500 to-indigo-600' : 'bg-gray-300'}`}
-                  style={{ width: `${actuators.compressor.power}%` }}
-                />
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-[#737491]">Status:</span>
-                <span className={`font-bold ${actuators.compressor.status ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {actuators.compressor.status ? '● RUNNING' : '○ STOPPED'}
-                </span>
+              {/* Status */}
+              <div className="flex items-center justify-between text-xs bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl p-3 border border-blue-200">
+                <span className="text-[#737491] font-semibold">Status:</span>
+                <span className="font-bold text-emerald-600">● Active</span>
               </div>
             </div>
           </div>

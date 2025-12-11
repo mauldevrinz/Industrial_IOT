@@ -1,20 +1,83 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Download, RefreshCw, Thermometer, Droplets, Wind, Zap, TrendingUp, TrendingDown, Activity, X, Database, Settings } from 'lucide-react';
+import { Download, RefreshCw, Thermometer, Droplets, Wind, Zap, TrendingUp, TrendingDown, Activity, X, Database, Settings, Cpu, Box, Gauge as GaugeIcon } from 'lucide-react';
 import { useMultipleSensors } from '../../hooks/useSensorData';
+import { useMQTT } from '../../hooks/useMQTT';
+import { useMQTTPolling } from '../../hooks/useMQTTPolling';
+import { useSensorContext } from '../../context/SensorContext';
 
 const Data = () => {
   const { temperature, level, pressure, co2 } = useMultipleSensors();
-  const [selectedMetric, setSelectedMetric] = useState('temperature');
+  const { isConnected, subscribe } = useMQTT();
+  const pollData = useMQTTPolling(1000); // Poll every 1 second
+  const { sensorHistory, setSensorHistory, addDataPoint, MAX_HISTORY } = useSensorContext();
+  const [selectedSensor, setSelectedSensor] = useState('adxl345'); // Sensor dropdown
+  const [selectedParameter, setSelectedParameter] = useState('ax'); // Parameter button
   const [showExportModal, setShowExportModal] = useState(false);
 
-  // Debug: Log sensor data
-  console.log('📊 Data Page - Sensor Data:', {
-    temperature: { current: temperature.current, historyLength: temperature.history.length },
-    level: { current: level.current, historyLength: level.history.length },
-    pressure: { current: pressure.current, historyLength: pressure.history.length },
-    co2: { current: co2.current, historyLength: co2.history.length },
-  });
+  // Subscribe to ESP32 sensors via MQTT (WebSocket)
+  useEffect(() => {
+    if (!isConnected) return;
+
+    const handleADXL = (payload) => {
+      if (payload?.ax !== undefined) {
+        addDataPoint('adxl345', 'ax', payload.ax);
+        addDataPoint('adxl345', 'ay', payload.ay);
+        addDataPoint('adxl345', 'az', payload.az);
+      }
+    };
+
+    const handleMPU = (payload) => {
+      if (payload?.accel?.x !== undefined) {
+        addDataPoint('mpu6050', 'accel_x', payload.accel.x);
+        addDataPoint('mpu6050', 'accel_y', payload.accel.y);
+        addDataPoint('mpu6050', 'accel_z', payload.accel.z);
+        addDataPoint('mpu6050', 'gyro_x', payload.gyro.x);
+        addDataPoint('mpu6050', 'gyro_y', payload.gyro.y);
+        addDataPoint('mpu6050', 'gyro_z', payload.gyro.z);
+      }
+    };
+
+    const handleBMP = (payload) => {
+      if (payload?.temp !== undefined) {
+        addDataPoint('bmp280', 'temp', payload.temp);
+        addDataPoint('bmp280', 'pressure', payload.pressure);
+        addDataPoint('bmp280', 'altitude', payload.altitude);
+      }
+    };
+
+    subscribe('iiot/sensors/adxl345', handleADXL);
+    subscribe('iiot/sensors/mpu6050', handleMPU);
+    subscribe('iiot/sensors/bmp280', handleBMP);
+  }, [isConnected, subscribe]);
+
+  // Fallback: Sync polling data when WebSocket not connected
+  useEffect(() => {
+    if (!pollData.isConnected || isConnected) return; // Only use polling as fallback
+
+    const sensorData = pollData.sensorData;
+    
+    if (sensorData?.adxl345) {
+      addDataPoint('adxl345', 'ax', sensorData.adxl345.ax);
+      addDataPoint('adxl345', 'ay', sensorData.adxl345.ay);
+      addDataPoint('adxl345', 'az', sensorData.adxl345.az);
+    }
+    
+    if (sensorData?.mpu6050?.accel) {
+      addDataPoint('mpu6050', 'accel_x', sensorData.mpu6050.accel.x);
+      addDataPoint('mpu6050', 'accel_y', sensorData.mpu6050.accel.y);
+      addDataPoint('mpu6050', 'accel_z', sensorData.mpu6050.accel.z);
+      addDataPoint('mpu6050', 'gyro_x', sensorData.mpu6050.gyro.x);
+      addDataPoint('mpu6050', 'gyro_y', sensorData.mpu6050.gyro.y);
+      addDataPoint('mpu6050', 'gyro_z', sensorData.mpu6050.gyro.z);
+    }
+    
+    if (sensorData?.bmp280) {
+      addDataPoint('bmp280', 'temp', sensorData.bmp280.temp);
+      addDataPoint('bmp280', 'pressure', sensorData.bmp280.pressure);
+      addDataPoint('bmp280', 'altitude', sensorData.bmp280.altitude);
+    }
+  }, [pollData.sensorData, isConnected, pollData.isConnected]);
 
   // Data Management Settings
   const [dataSettings, setDataSettings] = useState({
@@ -29,40 +92,19 @@ const Data = () => {
   };
 
   const getChartData = () => {
-    let sensorData;
-    switch (selectedMetric) {
-      case 'temperature':
-        sensorData = temperature;
-        break;
-      case 'level':
-        sensorData = level;
-        break;
-      case 'pressure':
-        sensorData = pressure;
-        break;
-      case 'co2':
-        sensorData = co2;
-        break;
-      default:
-        sensorData = temperature;
-    }
-
-    console.log(`📈 Chart Data for ${selectedMetric}:`, {
-      historyLength: sensorData.history.length,
-      history: sensorData.history,
-    });
-
-    // If no history, create placeholder with current value
-    if (!sensorData.history || sensorData.history.length === 0) {
+    // Get data from selected sensor and parameter
+    const data = sensorHistory[selectedSensor]?.[selectedParameter] || [];
+    
+    if (data.length === 0) {
       return [{
         time: new Date().toLocaleTimeString(),
-        value: sensorData.current || 0,
+        value: 0
       }];
     }
 
-    return sensorData.history.map((item, index) => ({
-      time: item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : `T${index}`,
-      value: item.value || 0,
+    return data.map((item) => ({
+      time: new Date(item.timestamp).toLocaleTimeString(),
+      value: item.value
     }));
   };
 
@@ -100,50 +142,61 @@ const Data = () => {
     setShowExportModal(false);
   };
 
-  const metrics = [
-    {
-      id: 'temperature',
-      name: 'Temperature',
-      unit: '°C',
-      color: '#f97316',
-      gradient: 'from-orange-500 to-red-500',
-      icon: Thermometer,
-      bg: 'from-orange-50 to-red-50',
-      darkBg: 'from-orange-500 to-red-500'
-    },
-    {
-      id: 'level',
-      name: 'Level',
-      unit: 'Level',
+  // ESP32 Sensor definitions
+  const esp32Sensors = {
+    adxl345: {
+      id: 'adxl345',
+      name: 'ADXL345',
+      description: '3-Axis Accelerometer',
       color: '#3b82f6',
       gradient: 'from-blue-500 to-cyan-500',
-      icon: Droplets,
+      icon: Cpu,
       bg: 'from-blue-50 to-cyan-50',
-      darkBg: 'from-blue-500 to-cyan-500'
+      darkBg: 'from-blue-500 to-cyan-500',
+      parameters: [
+        { id: 'ax', name: 'Acceleration X', unit: 'g' },
+        { id: 'ay', name: 'Acceleration Y', unit: 'g' },
+        { id: 'az', name: 'Acceleration Z', unit: 'g' }
+      ]
     },
-    {
-      id: 'pressure',
-      name: 'Pressure',
-      unit: 'PSI',
+    mpu6050: {
+      id: 'mpu6050',
+      name: 'MPU6050',
+      description: '6-Axis IMU Sensor',
       color: '#10b981',
       gradient: 'from-emerald-500 to-teal-500',
-      icon: Wind,
+      icon: Box,
       bg: 'from-emerald-50 to-teal-50',
-      darkBg: 'from-emerald-500 to-teal-500'
+      darkBg: 'from-emerald-500 to-teal-500',
+      parameters: [
+        { id: 'accel_x', name: 'Accel X', unit: 'm/s²' },
+        { id: 'accel_y', name: 'Accel Y', unit: 'm/s²' },
+        { id: 'accel_z', name: 'Accel Z', unit: 'm/s²' },
+        { id: 'gyro_x', name: 'Gyro X', unit: '°/s' },
+        { id: 'gyro_y', name: 'Gyro Y', unit: '°/s' },
+        { id: 'gyro_z', name: 'Gyro Z', unit: '°/s' }
+      ]
     },
-    {
-      id: 'co2',
-      name: 'CO2 Gas',
-      unit: 'ppm',
-      color: '#a855f7',
-      gradient: 'from-purple-500 to-pink-500',
-      icon: Zap,
-      bg: 'from-purple-50 to-pink-50',
-      darkBg: 'from-purple-500 to-pink-500'
-    },
-  ];
+    bmp280: {
+      id: 'bmp280',
+      name: 'BMP280',
+      description: 'Barometric Sensor',
+      color: '#f97316',
+      gradient: 'from-orange-500 to-red-500',
+      icon: GaugeIcon,
+      bg: 'from-orange-50 to-red-50',
+      darkBg: 'from-orange-500 to-red-500',
+      parameters: [
+        { id: 'temp', name: 'Temperature', unit: '°C' },
+        { id: 'pressure', name: 'Pressure', unit: 'hPa' },
+        { id: 'altitude', name: 'Altitude', unit: 'm' }
+      ]
+    }
+  };
 
-  const currentMetric = metrics.find(m => m.id === selectedMetric);
+  const currentSensor = esp32Sensors[selectedSensor];
+  const currentParam = currentSensor.parameters.find(p => p.id === selectedParameter) || currentSensor.parameters[0];
+
   const chartData = getChartData();
   const latestValue = chartData[chartData.length - 1]?.value || 0;
   const previousValue = chartData[chartData.length - 2]?.value || 0;
@@ -151,17 +204,17 @@ const Data = () => {
 
   // Calculate statistics
   const values = chartData.map(d => d.value);
-  const maxValue = Math.max(...values);
-  const minValue = Math.min(...values);
-  const avgValue = values.reduce((a, b) => a + b, 0) / values.length;
+  const maxValue = values.length > 0 ? Math.max(...values) : 0;
+  const minValue = values.length > 0 ? Math.min(...values) : 0;
+  const avgValue = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
 
   const CustomTooltip = ({ active, payload }) => {
     if (active && payload && payload.length) {
       return (
         <div className="bg-white p-4 rounded-xl shadow-xl border-2 border-gray-200">
           <p className="font-semibold text-gray-700 text-xs mb-1">{payload[0].payload.time}</p>
-          <p className={`text-xl font-bold bg-gradient-to-r ${currentMetric.gradient} bg-clip-text text-transparent`}>
-            {payload[0].value.toFixed(2)} {currentMetric.unit}
+          <p className={`text-xl font-bold bg-gradient-to-r ${currentSensor.gradient} bg-clip-text text-transparent`}>
+            {payload[0].value.toFixed(3)} {currentParam.unit}
           </p>
         </div>
       );
@@ -177,8 +230,8 @@ const Data = () => {
         <div className="mb-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">Sensor Data Monitoring</h1>
-              <p className="text-gray-600">Real-time sensor data visualization and analysis</p>
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">ESP32 Sensor Data Monitoring</h1>
+              <p className="text-gray-600">Real-time ESP32 sensor data visualization via MQTT</p>
             </div>
             <div className="flex space-x-3">
               <button
@@ -190,7 +243,7 @@ const Data = () => {
               </button>
               <button
                 onClick={() => setShowExportModal(true)}
-                className={`flex items-center space-x-2 px-4 py-2.5 bg-gradient-to-r ${currentMetric.gradient} text-white rounded-xl hover:shadow-lg transition font-semibold`}
+                className={`flex items-center space-x-2 px-4 py-2.5 bg-gradient-to-r ${currentSensor.gradient} text-white rounded-xl hover:shadow-lg transition font-semibold`}
               >
                 <Download className="w-4 h-4" />
                 <span>Export Data</span>
@@ -206,7 +259,7 @@ const Data = () => {
           <div className="lg:col-span-1 space-y-6">
 
             {/* Current Value Card */}
-            <div className={`bg-gradient-to-br ${currentMetric.darkBg} rounded-2xl p-6 shadow-xl relative overflow-hidden`}>
+            <div className={`bg-gradient-to-br ${currentSensor.darkBg} rounded-2xl p-6 shadow-xl relative overflow-hidden`}>
               {/* Decorative background */}
               <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16"></div>
               <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/10 rounded-full -ml-12 -mb-12"></div>
@@ -214,20 +267,20 @@ const Data = () => {
               <div className="relative z-10">
                 <div className="flex items-center space-x-3 mb-6">
                   <div className="bg-white/20 p-3 rounded-xl backdrop-blur-sm">
-                    <currentMetric.icon className="w-6 h-6 text-white" />
+                    <currentSensor.icon className="w-6 h-6 text-white" />
                   </div>
                   <div>
                     <p className="text-white/80 text-sm font-medium">Current Reading</p>
-                    <p className="text-white text-lg font-bold">{currentMetric.name}</p>
+                    <p className="text-white text-lg font-bold">{currentParam.name}</p>
                   </div>
                 </div>
 
                 <div className="mb-4">
                   <div className="flex items-baseline space-x-2">
                     <span className="text-6xl font-bold text-white">
-                      {selectedMetric === 'level' ? Math.round(latestValue) : latestValue.toFixed(1)}
+                      {latestValue.toFixed(2)}
                     </span>
-                    <span className="text-3xl font-semibold text-white/80">{currentMetric.unit}</span>
+                    <span className="text-3xl font-semibold text-white/80">{currentParam.unit}</span>
                   </div>
                 </div>
 
@@ -248,24 +301,24 @@ const Data = () => {
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-white rounded-xl p-4 shadow-md">
                 <p className="text-xs text-gray-500 mb-1 font-medium">Maximum</p>
-                <p className={`text-xl font-bold bg-gradient-to-r ${currentMetric.gradient} bg-clip-text text-transparent`}>
-                  {selectedMetric === 'level' ? Math.round(maxValue) : maxValue.toFixed(1)}
+                <p className={`text-xl font-bold bg-gradient-to-r ${currentSensor.gradient} bg-clip-text text-transparent`}>
+                  {maxValue.toFixed(2)}
                 </p>
-                <p className="text-xs text-gray-400">{currentMetric.unit}</p>
+                <p className="text-xs text-gray-400">{currentParam.unit}</p>
               </div>
               <div className="bg-white rounded-xl p-4 shadow-md">
                 <p className="text-xs text-gray-500 mb-1 font-medium">Average</p>
-                <p className={`text-xl font-bold bg-gradient-to-r ${currentMetric.gradient} bg-clip-text text-transparent`}>
-                  {selectedMetric === 'level' ? Math.round(avgValue) : avgValue.toFixed(1)}
+                <p className={`text-xl font-bold bg-gradient-to-r ${currentSensor.gradient} bg-clip-text text-transparent`}>
+                  {avgValue.toFixed(2)}
                 </p>
-                <p className="text-xs text-gray-400">{currentMetric.unit}</p>
+                <p className="text-xs text-gray-400">{currentParam.unit}</p>
               </div>
               <div className="bg-white rounded-xl p-4 shadow-md">
                 <p className="text-xs text-gray-500 mb-1 font-medium">Minimum</p>
-                <p className={`text-xl font-bold bg-gradient-to-r ${currentMetric.gradient} bg-clip-text text-transparent`}>
-                  {selectedMetric === 'level' ? Math.round(minValue) : minValue.toFixed(1)}
+                <p className={`text-xl font-bold bg-gradient-to-r ${currentSensor.gradient} bg-clip-text text-transparent`}>
+                  {minValue.toFixed(2)}
                 </p>
-                <p className="text-xs text-gray-400">{currentMetric.unit}</p>
+                <p className="text-xs text-gray-400">{currentParam.unit}</p>
               </div>
             </div>
 
@@ -275,43 +328,56 @@ const Data = () => {
                 <Activity className="w-5 h-5 text-gray-700" />
                 <h2 className="text-lg font-bold text-gray-900">Select Sensor</h2>
               </div>
-              <div className="space-y-3">
-                {metrics.map((metric) => {
-                  const Icon = metric.icon;
-                  const isSelected = selectedMetric === metric.id;
-                  return (
-                    <button
-                      key={metric.id}
-                      onClick={() => setSelectedMetric(metric.id)}
-                      className={`w-full relative overflow-hidden p-4 rounded-xl border-2 transition-all duration-300 ${
-                        isSelected
-                          ? `border-transparent bg-gradient-to-r ${metric.gradient} text-white shadow-lg`
-                          : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-md'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
-                          <div className={`p-2 rounded-lg ${isSelected ? 'bg-white/20' : 'bg-gray-100'}`}>
-                            <Icon className={`w-5 h-5 ${isSelected ? 'text-white' : 'text-gray-600'}`} />
-                          </div>
-                          <div className="text-left">
-                            <div className={`text-base font-bold ${isSelected ? 'text-white' : 'text-gray-900'}`}>
-                              {metric.name}
-                            </div>
-                            <div className={`text-xs ${isSelected ? 'text-white/80' : 'text-gray-500'}`}>
-                              {metric.id === 'level' ? '3 Levels (1-3)' : `Unit: ${metric.unit}`}
-                            </div>
-                          </div>
+              
+              {/* Sensor Dropdown */}
+              <div className="mb-4">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  ESP32 Sensor
+                </label>
+                <select
+                  value={selectedSensor}
+                  onChange={(e) => {
+                    setSelectedSensor(e.target.value);
+                    setSelectedParameter(esp32Sensors[e.target.value].parameters[0].id);
+                  }}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition font-semibold"
+                >
+                  {Object.values(esp32Sensors).map((sensor) => (
+                    <option key={sensor.id} value={sensor.id}>
+                      {sensor.name} - {sensor.description}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Parameter Buttons */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Parameter
+                </label>
+                <div className="grid grid-cols-1 gap-2">
+                  {currentSensor.parameters.map((param) => {
+                    const isSelected = selectedParameter === param.id;
+                    return (
+                      <button
+                        key={param.id}
+                        onClick={() => setSelectedParameter(param.id)}
+                        className={`w-full p-3 rounded-xl border-2 transition-all duration-300 font-semibold text-sm ${
+                          isSelected
+                            ? `border-transparent bg-gradient-to-r ${currentSensor.gradient} text-white shadow-lg`
+                            : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-md text-gray-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span>{param.name}</span>
+                          <span className={`text-xs ${isSelected ? 'text-white/80' : 'text-gray-500'}`}>
+                            {param.unit}
+                          </span>
                         </div>
-                        {isSelected && (
-                          <div className="bg-white/20 px-2 py-1 rounded-md">
-                            <span className="text-xs font-bold text-white">Active</span>
-                          </div>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>
@@ -322,12 +388,12 @@ const Data = () => {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">
-                    {currentMetric.name} Trend Chart
+                    {currentSensor.name} - {currentParam.name}
                   </h2>
                   <p className="text-gray-500 text-sm">Real-time data visualization</p>
                 </div>
-                <div className={`px-4 py-2 rounded-lg bg-gradient-to-r ${currentMetric.bg}`}>
-                  <span className={`text-sm font-bold bg-gradient-to-r ${currentMetric.gradient} bg-clip-text text-transparent`}>
+                <div className={`px-4 py-2 rounded-lg bg-gradient-to-r ${currentSensor.bg}`}>
+                  <span className={`text-sm font-bold bg-gradient-to-r ${currentSensor.gradient} bg-clip-text text-transparent`}>
                     {chartData.length} data points
                   </span>
                 </div>
@@ -338,8 +404,8 @@ const Data = () => {
                   <AreaChart data={chartData}>
                   <defs>
                     <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={currentMetric.color} stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor={currentMetric.color} stopOpacity={0}/>
+                      <stop offset="5%" stopColor={currentSensor.color} stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor={currentSensor.color} stopOpacity={0}/>
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -357,10 +423,10 @@ const Data = () => {
                   <Area
                     type="monotone"
                     dataKey="value"
-                    stroke={currentMetric.color}
+                    stroke={currentSensor.color}
                     strokeWidth={3}
                     fill="url(#colorValue)"
-                    dot={{ r: 4, fill: currentMetric.color, strokeWidth: 2, stroke: '#fff' }}
+                    dot={{ r: 4, fill: currentSensor.color, strokeWidth: 2, stroke: '#fff' }}
                     activeDot={{ r: 6, strokeWidth: 2 }}
                   />
                 </AreaChart>
@@ -372,11 +438,11 @@ const Data = () => {
 
         {/* Data Table */}
         <div className="bg-white rounded-2xl shadow-lg p-6">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6">Recent Readings</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mb-6">Recent Readings - {currentParam.name}</h2>
           <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead>
-                <tr className={`bg-gradient-to-r ${currentMetric.bg}`}>
+                <tr className={`bg-gradient-to-r ${currentSensor.bg}`}>
                   <th className="px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider rounded-tl-lg">
                     Timestamp
                   </th>
@@ -399,12 +465,12 @@ const Data = () => {
                         {row.time}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`text-lg font-bold bg-gradient-to-r ${currentMetric.gradient} bg-clip-text text-transparent`}>
-                          {row.value.toFixed(2)}
+                        <span className={`text-lg font-bold bg-gradient-to-r ${currentSensor.gradient} bg-clip-text text-transparent`}>
+                          {row.value.toFixed(3)}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 font-medium">
-                        {currentMetric.unit}
+                        {currentParam.unit}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-emerald-100 text-emerald-800">
@@ -419,7 +485,7 @@ const Data = () => {
                       <div className="text-gray-400">
                         <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
                         <p className="text-lg font-semibold">No data available yet</p>
-                        <p className="text-sm">Waiting for sensor data from MQTT...</p>
+                        <p className="text-sm">Waiting for ESP32 sensor data from MQTT...</p>
                       </div>
                     </td>
                   </tr>
@@ -527,13 +593,13 @@ const Data = () => {
                 </div>
 
                 {/* Current Selection Info */}
-                <div className={`bg-gradient-to-r ${currentMetric.bg} border-2 rounded-xl p-4`}>
+                <div className={`bg-gradient-to-r ${currentSensor.bg} border-2 rounded-xl p-4`}>
                   <h4 className="font-semibold text-gray-900 mb-2">Current Selection</h4>
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div>
                       <span className="text-gray-600">Sensor:</span>
-                      <span className={`ml-2 font-bold bg-gradient-to-r ${currentMetric.gradient} bg-clip-text text-transparent`}>
-                        {currentMetric.name}
+                      <span className={`ml-2 font-bold bg-gradient-to-r ${currentSensor.gradient} bg-clip-text text-transparent`}>
+                        {currentSensor.name} - {currentParam.name}
                       </span>
                     </div>
                     <div>
@@ -562,7 +628,7 @@ const Data = () => {
                 </button>
                 <button
                   onClick={exportData}
-                  className={`flex items-center space-x-2 px-6 py-3 bg-gradient-to-r ${currentMetric.gradient} text-white rounded-xl hover:shadow-lg transition font-semibold`}
+                  className={`flex items-center space-x-2 px-6 py-3 bg-gradient-to-r ${currentSensor.gradient} text-white rounded-xl hover:shadow-lg transition font-semibold`}
                 >
                   <Download className="w-5 h-5" />
                   <span>Export Now</span>

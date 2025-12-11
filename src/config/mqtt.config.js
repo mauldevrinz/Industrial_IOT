@@ -1,11 +1,11 @@
 // MQTT Configuration for ESP32 Integration
 export const mqttConfig = {
-  // Broker Configuration
+  // Broker Configuration - use HiveMQ public broker WebSocket
   broker: {
     host: 'broker.hivemq.com', // HiveMQ public broker
-    port: 8000, // WebSocket port
-    protocol: 'ws', // Use 'ws' for WebSocket
-    path: '/mqtt', // MQTT path
+    port: 8001, // WebSocket Secure port
+    protocol: 'wss', // Use 'wss' for Secure WebSocket
+    path: '/mqtt', // MQTT WebSocket path
     // Use more unique client ID to avoid collisions
     clientId: `iiot_web_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`,
   },

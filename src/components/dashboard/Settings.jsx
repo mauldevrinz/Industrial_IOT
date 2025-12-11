@@ -137,11 +137,11 @@ const Settings = () => {
     }
   };
 
-  const handleOpenPLCEditor = async () => {
-    setPlcStatus('Opening OpenPLC Editor...');
+  const handleOpenArduinoIDE = async () => {
+    setPlcStatus('Opening Arduino IDE...');
     try {
-      // Call backend API to open OpenPLC Editor
-      const response = await fetch('http://localhost:3001/api/open-plc-editor', {
+      // Call backend API to open Arduino IDE
+      const response = await fetch('http://localhost:3001/api/open-arduino-ide', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -149,7 +149,7 @@ const Settings = () => {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        setPlcStatus('✅ OpenPLC Editor opened successfully!');
+        setPlcStatus('✅ Arduino IDE opened successfully!');
       } else {
         setPlcStatus('❌ Failed to open: ' + (data.message || 'Unknown error'));
       }
@@ -159,6 +159,10 @@ const Settings = () => {
     }
 
     setTimeout(() => setPlcStatus(''), 5000);
+  };
+
+  const handleOpenEdgeImpulse = () => {
+    window.open('https://studio.edgeimpulse.com/', '_blank');
   };
 
   const handleFileSelect = (event) => {
@@ -236,10 +240,10 @@ const Settings = () => {
           <p className="text-gray-600">Configure your IIoT dashboard and device connections</p>
         </div>
 
-        {/* PLC & OTA Control Section */}
+        {/* Development Tools Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
 
-          {/* OpenPLC Editor Card */}
+          {/* Arduino IDE Card */}
           <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl shadow-xl p-6 text-white relative overflow-hidden">
             <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16"></div>
             <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/10 rounded-full -ml-12 -mb-12"></div>
@@ -250,21 +254,29 @@ const Settings = () => {
                   <Terminal className="w-6 h-6" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold">OpenPLC Editor</h2>
-                  <p className="text-sm text-blue-100">Program your PLC logic</p>
+                  <h2 className="text-xl font-bold">Arduino IDE</h2>
+                  <p className="text-sm text-blue-100">Program ESP32 devices</p>
                 </div>
               </div>
 
               <p className="text-sm text-blue-50 mb-6">
-                Launch OpenPLC Editor to create and edit ladder logic programs for your industrial controllers.
+                Launch Arduino IDE to program and upload firmware to your ESP32 and other Arduino-compatible devices.
               </p>
 
               <button
-                onClick={handleOpenPLCEditor}
-                className="w-full bg-white text-blue-600 px-6 py-3 rounded-xl hover:bg-blue-50 transition font-semibold flex items-center justify-center space-x-2 shadow-lg"
+                onClick={handleOpenArduinoIDE}
+                className="w-full bg-white text-blue-600 px-6 py-3 rounded-xl hover:bg-blue-50 transition font-semibold flex items-center justify-center space-x-2 shadow-lg mb-4"
               >
                 <FolderOpen className="w-5 h-5" />
-                <span>Open PLC Editor</span>
+                <span>Open Arduino IDE</span>
+              </button>
+
+              <button
+                onClick={handleOpenEdgeImpulse}
+                className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white px-6 py-3 rounded-xl hover:from-purple-700 hover:to-pink-700 transition font-semibold flex items-center justify-center space-x-2 shadow-lg"
+              >
+                <Zap className="w-5 h-5" />
+                <span>Open Edge Impulse Studio</span>
               </button>
 
               {plcStatus && (
@@ -275,7 +287,7 @@ const Settings = () => {
 
               <div className="mt-4 text-xs text-blue-100">
                 <Info className="w-4 h-4 inline mr-1" />
-                Path: ~/Documents/OpenPLC_Editor
+                Arduino IDE & ML Training Tools
               </div>
             </div>
           </div>

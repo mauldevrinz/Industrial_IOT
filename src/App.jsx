@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { useState } from 'react';
+import { SensorProvider } from './context/SensorContext';
 import Sidebar from './components/Sidebar';
 import Navbar from './components/Navbar';
 import Overview from './components/dashboard/Overview';
@@ -12,7 +13,8 @@ function App() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   return (
-    <Router>
+    <SensorProvider>
+      <Router>
       <div className="flex">
         {/* Mobile Overlay */}
         {isMobileSidebarOpen && (
@@ -39,6 +41,7 @@ function App() {
         </main>
       </div>
     </Router>
+    </SensorProvider>
   );
 }
 

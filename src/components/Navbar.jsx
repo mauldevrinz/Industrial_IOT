@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Wifi, Menu, X, MessageCircle, Github, Linkedin, Instagram } from 'lucide-react';
-import { useMQTT } from '../hooks/useMQTT';
+import { useMQTTStatus } from '../hooks/useMQTTStatus';
 
 const Navbar = ({ title, subtitle, onMenuClick }) => {
-  const { isConnected } = useMQTT();
+  const { isConnected } = useMQTTStatus(2000); // Check every 2 seconds
   const [showContactModal, setShowContactModal] = useState(false);
 
   const contactLinks = [

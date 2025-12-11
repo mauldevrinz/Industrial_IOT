@@ -21,8 +21,8 @@ class MQTTService {
     return new Promise((resolve, reject) => {
       try {
         const { broker, auth, options } = mqttConfig;
-        // Build URL with path
-        const path = broker.path || '/mqtt';
+        // Build URL with path if provided
+        const path = broker.path ? `${broker.path}` : '';
         const url = `${broker.protocol}://${broker.host}:${broker.port}${path}`;
 
         const connectOptions = {
@@ -34,7 +34,7 @@ class MQTTService {
 
         console.log('🔌 Connecting to MQTT broker:', url);
         console.log('📋 Client ID:', connectOptions.clientId);
-        console.log('🛤️  Path:', path);
+        if (path) console.log('🛤️  Path:', path);
 
         this.client = mqtt.connect(url, connectOptions);
 
@@ -56,15 +56,6 @@ class MQTTService {
 
         this.client.on('disconnect', (packet) => {
           console.log('🔌 MQTT Disconnect event');
-          console.log('   Packet:', packet);
-        });
-
-        this.client.on('packetsend', (packet) => {
-          console.log('📤 Packet sent:', packet.cmd);
-        });
-
-        this.client.on('packetreceive', (packet) => {
-          console.log('📥 Packet received:', packet.cmd);
         });
 
         this.client.on('error', (error) => {
@@ -117,21 +108,13 @@ class MQTTService {
   handleMessage(topic, message) {
     try {
       const messageStr = message.toString();
-      console.log('📥 Raw message from topic:', topic);
-      console.log('   Data:', messageStr);
-
       const payload = JSON.parse(messageStr);
-      console.log('✅ Parsed payload:', payload);
 
       // Notify all subscribers for this topic
       if (this.subscribers.has(topic)) {
-        console.log(`📢 Notifying ${this.subscribers.get(topic).length} subscriber(s) for topic: ${topic}`);
         this.subscribers.get(topic).forEach(callback => {
           callback(payload);
         });
-      } else {
-        console.warn(`⚠️  No subscribers for topic: ${topic}`);
-        console.log('   Available subscriptions:', Array.from(this.subscribers.keys()));
       }
 
       // Notify wildcard subscribers
@@ -141,22 +124,19 @@ class MQTTService {
             subscribedTopic.replace(/\+/g, '[^/]+').replace(/#/g, '.*')
           );
           if (regex.test(topic)) {
-            console.log(`📢 Notifying wildcard subscribers for: ${subscribedTopic}`);
             callbacks.forEach(callback => callback(payload, topic));
           }
         }
       });
     } catch (error) {
-      console.error('❌ Error parsing MQTT message:', error);
-      console.error('   Topic:', topic);
-      console.error('   Message:', message.toString());
+      console.error('❌ Error parsing message from', topic);
     }
   }
 
   // Subscribe to a topic
   subscribe(topic, callback, qos = mqttConfig.qos.default) {
     if (!this.client || !this.client.connected) {
-      console.warn('⚠️  MQTT client not connected - queueing subscription for', topic);
+      console.warn('⚠️  MQTT client not connected - will retry subscription for', topic);
 
       // Queue the subscription to be done after connection
       const doSubscribe = () => {
@@ -166,34 +146,31 @@ class MQTTService {
         }
       };
       this.client.once('connect', doSubscribe);
-      return;
+      return () => {}; // Return dummy unsubscribe for cleanup
     }
 
     // Store callback for this topic FIRST (before MQTT subscribe)
     if (!this.subscribers.has(topic)) {
       this.subscribers.set(topic, []);
-
-      // Only subscribe to MQTT topic once (when first subscriber is added)
-      console.log(`📡 First subscription to topic: ${topic} (QoS: ${qos})`);
-
-      // Add delay between subscriptions to avoid overwhelming broker
-      setTimeout(() => {
-        if (this.client && this.client.connected) {
-          this.client.subscribe(topic, { qos }, (error) => {
-            if (error) {
-              console.error(`❌ Error subscribing to ${topic}:`, error);
-              return;
-            }
+      console.log(`📡 Subscribing to MQTT topic: ${topic} (QoS: ${qos})`);
+      
+      // Subscribe to MQTT topic immediately
+      if (this.client && this.client.connected) {
+        this.client.subscribe(topic, { qos }, (error) => {
+          if (error) {
+            console.error(`❌ Error subscribing to ${topic}:`, error);
+          } else {
             console.log(`✅ Successfully subscribed to ${topic}`);
-          });
-        }
-      }, this.subscribers.size * 100); // 100ms delay per subscription
-    } else {
-      console.log(`📎 Adding callback to existing subscription: ${topic}`);
+          }
+        });
+      }
     }
 
-    this.subscribers.get(topic).push(callback);
-    console.log(`   Total callbacks for ${topic}: ${this.subscribers.get(topic).length}`);
+    // Add callback to this topic
+    if (!this.subscribers.get(topic).includes(callback)) {
+      this.subscribers.get(topic).push(callback);
+      console.log(`   ✓ Callback registered for ${topic}`);
+    }
 
     // Return unsubscribe function
     return () => this.unsubscribe(topic, callback);
